@@ -1,0 +1,12 @@
+1) Who need to create API?
+The entity that needs to "create" an API is the API publisher or the developer responsible for building the API, while the entity that needs to "subscribe" to an API is the API consumer who wants to access and utilize the functionality provided by that API; essentially, the publisher creates the API, and the consumer subscribes to it to gain access. 
+
+Key points:
+API Publisher:
+Designs and develops the API. 
+Manages access control and security settings. 
+Publishes the API for others to use. 
+API Subscriber (Consumer):
+Accesses the API by subscribing to it. 
+May need to provide authentication credentials to use the API. 
+Uses the API functionality within their own applications

@@ -1,0 +1,405 @@
+Default port: 5432
+Conf file: postgresql.conf
+
+Major version	Latest minor version	Status	End of support
+PostgreSQL 19	19.0	Latest release	November 2031 (expected)
+PostgreSQL 18	18.7	Supported	November 2030
+PostgreSQL 17	17.12	Supported	November 2029
+PostgreSQL 16	16.16	Supported	November 2028
+PostgreSQL 15	15.20	Supported	November 2027
+PostgreSQL 14	14.25	End of life	November 2026
+PostgreSQL 13	13.23	End of life	November 2025
+PostgreSQL 12	12.22	End of life	November 2024
+
+
+
+
+1) What are the event causing auto vaccum? 
+
+1️⃣ Dead Tuples Threshold Reached (UPDATE / DELETE activity)
+When rows are:
+	UPDATE → old version becomes dead
+	DELETE → row becomes dead
+PostgreSQL uses MVCC, so old row versions remain until cleaned.
+Autovacuum runs when:
+dead_tuples >
+autovacuum_vacuum_threshold
++
+(autovacuum_vacuum_scale_factor × total_rows)
+
+Default values:
+	autovacuum_vacuum_threshold = 50
+	autovacuum_vacuum_scale_factor = 0.2 (20%)
+
+Example:
+If table has 10,000 rows:
+50 + (0.2 × 10000) = 2050 dead tuples
+After ~2050 dead rows → autovacuum triggers.
+
+2️⃣ Insert-Heavy Tables (Prevent XID Wraparound)
+For insert-heavy tables (few deletes/updates), PostgreSQL 13+ added:
+	autovacuum_vacuum_insert_threshold
+	+
+	(autovacuum_vacuum_insert_scale_factor × inserts)
+This prevents transaction ID wraparound issues.
+
+3️⃣ Analyze Threshold Reached (Statistics Refresh)
+Autovacuum also runs ANALYZE automatically when:
+modified_rows >
+autovacuum_analyze_threshold
++
+(autovacuum_analyze_scale_factor × total_rows)
+
+Default:
+	autovacuum_analyze_threshold = 50
+	autovacuum_analyze_scale_factor = 0.1 (10%)
+This updates optimizer statistics.
+
+4️⃣ Anti-Wraparound Protection (Very Important)
+If a table’s relfrozenxid approaches:
+autovacuum_freeze_max_age (default 200M transactions)
+PostgreSQL forces autovacuum to prevent transaction ID wraparound.
+⚠️ This vacuum:
+	Cannot be cancelled
+	Runs aggressively
+	Can impact performance
+
+2) What is freeze?
+
+
+3) what is Anti-Wraparound?
+
+
+4) Freeze vs Anti-Wraparound?
+
+5) what is relfrozenxid
+
+6) What is Pgpool-II
+	Pgpool-II (Pgpool) is a middleware tool for PostgreSQL that sits between applications and PostgreSQL database servers. It manages database connections, provides connection pooling, load balancing, and high-availability features.
+
+Think of Pgpool as a connection manager and traffic controller for PostgreSQL.
+
+Without Pgpool:
+- Applications connect directly to PostgreSQL.
+- Each application connection consumes PostgreSQL server resources.
+- Applications need to manage primary/standby connectivity and failover.
+With Pgpool:
+- Applications connect to Pgpool.
+- Pgpool manages connections to PostgreSQL servers.
+- It can distribute eligible read queries across standby servers.
+- It can help manage failover and connection pooling.
+
+
+Feature	Description
+Connection pooling -->	Reuses existing PostgreSQL connections instead of creating new ones for every application connection.
+Load balancing -->	Distributes eligible read queries across multiple PostgreSQL servers.
+Automatic failover -->	Detects backend failures and can promote a standby through configured failover scripts.
+Replication management -->	Supports native replication and its own replication modes.
+Health checking -->	Periodically checks the availability of PostgreSQL backend servers.
+Connection limits -->	Helps control the number of connections reaching PostgreSQL.
+
+7) What is TOAST?
+
+In PostgreSQL, TOAST stands for The Oversized-Attribute Storage Technique.
+
+It is a mechanism PostgreSQL uses to store large column values that cannot efficiently fit within the normal database page.
+
+Large values such as TEXT, BYTEA, and large JSONB values may not fit efficiently inside the normal heap page.
+
+PostgreSQL uses TOAST to handle these oversized values.
+2. How TOAST works
+When a column value becomes too large, PostgreSQL can:
+1. Compress the value.
+2. Move the value out of the main table into a separate TOAST table.
+3. Split the value into smaller chunks.
+4. Store a reference (pointer) in the main table.
+
+8) Difference between reload and restart
+
+When we make chnages to server parameters, we need to reload the configuration for them to take effect
+Reload will just reload the new configration without restarting the service
+Few configuration changes in server parameter, do not get reflected intil we restart the serivce
+restart gracefully shitdown all activity, relinquishes the resournce, close all open files and start again with new configuration
+
+
+9) Configuration files?
+
+
+postgresql.conf: 
+	postgresql's main config file and the promary source of config parameter settings
+	It contains param ti help configure and manage perf of the postgresql server
+	Initdb installs a default copy of postresql.comf and is usually located in data directory
+	The file follows one parameter per line format
+	Parameters which requires restart are clearly marked in he file
+	Many parameter needs a sevrer restart tot ake effect 
+	
+	path: /etc/postgresql/17/main/postgresql.conf
+	
+postgresql.auto.conf
+	This file holds settings provided through "alert system" command
+	Settings in postgresql.auto.conf overrides the settings in postgresql.conf
+	alter system command provides a sql-accessible means of changing global dafaults
+	syntax: ALTER SYSTEM SET configuration_parameter='value'
+	sysntax to reset: ALTER SYSTEM RESET configuration_parameter;
+	syntax to reset all: ALTER SYSTEM RESET ALL;
+	
+	path: /var/lib/postgresql/17/main/
+	
+pg_hba.conf
+	HAB means host based authentication and is a client authentication file
+	It enables authentication between the postgresql server and the client application
+	The file sprcifies which hosts are allowed to connect, how client are autheticated, which postgresql user names they can use, which databases they can access
+	PostgreSQL rejects a connection it an entry is not found in pg_hba.conf
+	By defauly pg_hba.conf is located in the instances's data directory
+	
+
+
+pg_ident.conf
+	When using an external auth system such as ident or GSSAPI then name of the OS user that initiated the connection might not be the same as the db user(role) that is to be used
+	Username maps are defined in the ident map file
+	pg_ident.conf file is read on start-up and any chages needs pg_ctl reload
+	Username map can be applied to map the OS system user name to a database user
+	pg_ident.conf is used in conjunction with pg_hba.conf
+	
+	Path: /etc/postgresql/17/main/pg_ident.conf
+
+	peer: Obtain the clients OS user name from and chek if it matches the requested DB user. This is only available for local connection
+	
+10) vacuum vs vacuum full
+
+1. Why do we need VACUUM FULL?
+PostgreSQL uses MVCC (Multi-Version Concurrency Control).
+
+When you update or delete a row, PostgreSQL generally does not immediately remove the old row version. It marks the old version as dead.
+
+Example:
+
+Suppose a table initially occupies 10 GB.
+Operation	Table storage
+Initial data	10 GB
+Delete 40% of rows	Still approximately 10 GB
+Regular VACUUM	Approximately 10 GB
+VACUUM FULL	Potentially reduced to approximately 6 GB
+
+Regular VACUUM makes dead space reusable inside PostgreSQL, but generally does not return that space to the operating system.
+
+VACUUM FULL rewrites the table into a compact form and releases the old storage.
+2. VACUUM vs VACUUM FULL
+
+| Feature                  | VACUUM                              | VACUUM FULL                               |
+| ------------------------ | ----------------------------------- | ----------------------------------------- |
+| Purpose                  | Reclaims dead tuple space for reuse | Physically compacts the table             |
+| Returns disk space to OS | Generally no                        | Yes                                       |
+| Rewrites table           | No                                  | Yes                                       |
+| Table locking            | Allows normal reads and writes      | Requires `ACCESS EXCLUSIVE` lock          |
+| Execution time           | Generally faster                    | Generally slower                          |
+| Additional disk space    | Usually minimal                     | Requires additional temporary disk space  |
+| Index handling           | Does not rebuild indexes            | Rebuilds indexes as part of table rewrite |
+| Production impact        | Lower                               | Higher                                    |
+
+
+11) Pg upgrade process
+### **PostgreSQL Upgrade / Migration Methods Comparison**
+
+| Feature             | pg_upgrade                                   | Logical Replication                        | Dump and Restore                     |
+| ------------------- | -------------------------------------------- | ------------------------------------------ | ------------------------------------ |
+| **Method**          | Upgrades existing cluster                    | Replicates data to a new cluster           | Exports and imports data             |
+| **Downtime**        | Short, during upgrade and cutover            | Minimal, mainly during cutover             | Usually higher                       |
+| **Migration speed** | Generally fast                               | Depends on replication lag and data volume | Depends on database size             |
+| **Data transfer**   | Reuses existing data files in link/copy mode | Transfers changes logically                | Transfers dump files                 |
+| **Large databases** | Suitable                                     | Suitable with planning                     | Can be time-consuming                |
+| **Complexity**      | Medium                                       | High                                       | Low to medium                        |
+| **Best use case**   | Standard major version upgrade               | Minimal-downtime migration                 | Smaller databases or clean migration |
+
+3. Detailed pg_upgrade commands
+Example: PostgreSQL 15 to PostgreSQL 17 on Linux.
+
+Step 1: Check the existing version
+psql -c "SELECT version();"
+
+
+Step 2: Take a backup
+
+Take a full backup before starting the upgrade.
+
+For example:
+pg_dumpall -U postgres > full_backup.sql
+
+
+For large production databases, use a suitable physical backup solution as well.
+
+Step 3: Install PostgreSQL 17 binaries
+
+Install the target PostgreSQL version alongside PostgreSQL 15.
+/usr/pgsql-17/bin/postgres --version
+
+
+Step 4: Initialize the new data directory
+/usr/pgsql-17/bin/initdb -D /var/lib/pgsql/17/data
+
+
+Use compatible locale, encoding and data-checksum settings.
+
+Step 5: Stop the old PostgreSQL instance
+systemctl stop postgresql-15
+
+
+Ensure both old and new database servers are stopped before running the upgrade.
+
+Step 6: Run compatibility check
+
+Execute as the PostgreSQL operating system user:
+/usr/pgsql-17/bin/pg_upgrade \
+  --old-bindir=/usr/pgsql-15/bin \
+  --new-bindir=/usr/pgsql-17/bin \
+  --old-datadir=/var/lib/pgsql/15/data \
+  --new-datadir=/var/lib/pgsql/17/data \
+  --check
+
+
+Resolve any reported compatibility issues before proceeding.
+
+Step 7: Perform the upgrade
+/usr/pgsql-17/bin/pg_upgrade \
+  --old-bindir=/usr/pgsql-15/bin \
+  --new-bindir=/usr/pgsql-17/bin \
+  --old-datadir=/var/lib/pgsql/15/data \
+  --new-datadir=/var/lib/pgsql/17/data \
+  --jobs=4
+
+
+Step 8: Start the new PostgreSQL instance
+systemctl start postgresql-17
+
+
+Step 9: Update database statistics
+
+pg_upgrade generates scripts for post-upgrade maintenance.
+
+Run the generated analyze script, or use:
+/usr/pgsql-17/bin/vacuumdb \
+  --all \
+  --analyze-in-stages \
+  -U postgres
+
+
+Step 10: Validate the upgraded cluster
+SELECT version();
+
+SELECT datname
+FROM pg_database;
+
+SELECT * FROM pg_extension;
+
+
+21) Types of backup 
+
+### **PostgreSQL Backup Types**
+
+| Backup type          | Tool / Method                         | Description                                                                  | Typical use case                          |
+| -------------------- | ------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------- |
+| Logical backup       | `pg_dump`                             | Backs up a single database as SQL or archive format                          | Individual database backup                |
+| Logical backup       | `pg_dumpall`                          | Backs up all databases, roles and global objects                             | Entire PostgreSQL instance logical backup |
+| Physical backup      | `pg_basebackup`                       | Copies the complete PostgreSQL cluster data files                            | Full cluster backup                       |
+| Physical backup      | Filesystem-level backup               | Copies database files using a consistent filesystem/storage snapshot         | Large database backup                     |
+| Continuous Archiving | WAL Archiving                         | Archives Write-Ahead Log (WAL) files continuously                            | Point-in-Time Recovery (PITR)             |
+| Incremental backup   | `pg_basebackup` with incremental mode | Backs up changed data blocks relative to a previous backup                   | Reducing backup size and time             |
+| Third-party backup   | pgBackRest, Barman, WAL-G             | Provides backup automation, retention, compression and recovery capabilities | Enterprise backup management  
+
+
+22) Recovery process using WAL restore?
+
+You can apply WAL backups after restoring a PostgreSQL incremental backup. This is how Point-in-Time Recovery (PITR) works with physical incremental backups.
+
+2. Example scenario
+Assume:
+Backup activity	Time
+Full backup	12:00 AM
+Incremental backup 1	6:00 AM
+Incremental backup 2	12:00 PM
+WAL archiving	Continuous
+Accidental table deletion	2:30 PM
+Required recovery point	2:29 PM
+
+Recovery process:
+1. Restore the full backup.
+2. Apply incremental backup 1.
+3. Apply incremental backup 2.
+4. Replay archived WAL files.
+5. Stop recovery at 2:29 PM.
+6. Validate the recovered database.            |
+
+
+23) How to archive war files?
+
+Edit postgresql.conf.
+wal_level = replica
+archive_mode = on
+archive_command = 'cp %p /backup/wal/%f'
+
+
+Parameter	Purpose
+wal_level = replica	Generates sufficient WAL information for replication and archiving
+archive_mode = on	Enables WAL archiving
+archive_command	Copies completed WAL segments to the archive directory
+
+
+23) Streaming replication Arch
+
+Streaming replication cannot start with an empty standby server. Initially, the standby needs a copy of the primary database.
+
+This is called a Base Backup.
+
+Example:
+pg_basebackup \
+  -h 10.0.0.1 \
+  -U replicator \
+  -D /var/lib/postgresql/data \
+  -Fp -Xs -P -R
+
+
+This command:
+- Copies the primary database files.
+- Transfers the required WAL records.
+- Creates standby configuration using -R.
+- Creates standby.signal to enable standby mode.
+
+Step 1: Application sends a transaction to Primary
+
+For example:
+INSERT INTO employees
+(employee_id, employee_name)
+VALUES (101, 'John');
+
+
+The application connects to PG01, which handles the write operation.
+
+Step 2: Primary generates WAL records
+
+PostgreSQL generates WAL records describing the database changes.
+
+WAL records are written to the WAL buffers and flushed to WAL files according to transaction durability requirements.
+
+Step 3: WAL Sender process
+
+The primary has a background process called walsender.
+
+Its responsibility is to stream WAL records to connected standby servers.
+
+Step 4: WAL Receiver process
+
+The standby has a background process called walreceiver.
+
+It receives WAL records from the primary and writes them into its local WAL files.
+
+Step 5: WAL Replay
+
+The standby's startup process replays the received WAL records against its own data files.
+
+As a result, the standby database reflects the changes made on the primary.
+
+Step 6: Replication continues
+
+This process continues as transactions occur on the primary.
+
+The standby keeps receiving and replaying WAL records.

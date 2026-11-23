@@ -1,0 +1,19 @@
+Mongodb: When you need data guarantee, ACID propert with flexibility of NoSQL
+Sotres data in json like document, unstructered
+If descndary index and flexible query is reqirement then go for mongodb
+Data aggregation
+Mongo master, shared and confif server
+HA: Master slave model
+Write speed: write capacity is limited, writing to single master
+Query: Based on Json formating
+
+Cassnadra: Incredibly high single partition write thorughput and read throughput
+Very poor data gurantee
+If most of they query occured by the primary key then good to
+100% uptime is needed, its a multi master model
+huge amount of write,then choose
+Data model based on tables
+No configuration server
+HA: Multiple master nodes
+Write speed: Nodes accepte write inparalall
+Query: Similar to SQL

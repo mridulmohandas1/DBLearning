@@ -1,0 +1,40 @@
+1) LVM creation steps?
+Create physical volume or volumes from the existing hard drives.
+Create a Volume group and add the physical volumes to it.
+Create a Logical Volume from the Volume Group.
+Format the Logical Volume as required — xfs, ext4 etc.
+Finally, mount the new filesystem.
+
+2) How does Ansible works?
+Ansible works by connecting to managed nodes (servers or devices) using SSH or WinRM, and then pushing out small programs called "Ansible modules" to the nodes. 
+
+Here is a more detailed guide on how Ansible works:
+
+Step 1: Define the nodes to be configured in an inventory file.
+
+Step 2: Define the tasks you want to execute in a Playbook
+
+Step 3: Initiate the execution of the playbook on the managed nodes defined in the inventory file. 
+
+Step 4: The Ansible control node connects to the managed nodes (servers or devices) using SSH or WinRM, and invokes modules to perform specific actions on managed nodes, such as software installation or configuration adjustments.
+
+Step 5: After execution, Ansible provides detailed reports that help in troubleshooting and auditing. 
+
+This process allows for safe and repeatable automation of infrastructure and application management tasks. Additionally, Ansible's agentless architecture eliminates the need for agents on managed nodes; you only install Ansible in the control node.
+
+3) Hard link vs Soft link?
+Hard link:
+An additional directory entry for an existing file.
+Shares the same Inode number as the original file.
+Will NOT break if the original file is deleted. The data is only truly deleted when all hard links are removed.
+Cannot link files across different filesystems or partitions.
+Cannot be created for directories.
+Command: ln target_file link_name
+
+Soft link:
+A separate, special file that contains the path to the target file/directory.
+Has its own unique Inode number.
+Will break (dangle) if the original file is deleted, moved, or renamed.
+Can link files or directories across different filesystems.
+Can be created for directories (and is the standard way to do so).
+ln -s target_file_or_dir link_name

@@ -1,0 +1,2270 @@
+1) Lock pages in memory:
+Lock Pages in Memory is a Windows policy that determines which accounts can use a process to keep data in physical memory, preventing the system from paging the data to virtual memory on disk
+
+2) AWE Address Windowing Extensions
+The concept was to extend the ability of SQL Server to address more memory than the limits of the virtual address space (VAS) on 32bit systems (which is 2Gb-3Gb). But the SQL team couldn’t do this alone. So the Windows team built an API to support this capability called Address Windowing Extensions
+
+3) Index Allocation MAP:
+An IAM page is just like a GAM or SGAM page, IAM tracks which extents belong to a table or index. It maps 4 GB of data in the database file and has a bit for each extent that the index or heap owns (including up to 8 pages from shared extents). If the index/heap owns data outside of this 4 GB region that the IAM maps, then you have more than one IAM page, and these IAM pages are maintained as a linked list. So, an IAM scan means that SQL Server uses the IAM(s) and visit the extents/pages that are owned by this index/heap.
+	GAM: GAM tracks which extents are free in a data file.1 = ExtENT IS FREE, 0 = ExtENT IS USED, 1 extent = 8 pages = 64 KB
+	SGAM: SGAM tracks which extents are being used as mixed extents and still have free pages.  
+	Page Free Space: system pages to find a page with enough room
+
+IAM = “Where is my data?”
+SGAM = “Where can I put new data?”
+
+3.1) IAM scan vs index scan
+IAM: It’s SQL Server scanning the allocation map pages to find out: which index belongs to this table or index. No row returned
+Index Scan: An Index Scan reads the actual data pages of an index or heap. which reads leaf-level pages of cluster index and non clusterindex. It returns row 
+
+3.2) whether a table scan uses IAM
+	Table Scan = uses IAM to find all the pages belonging to the table.
+
+3.2) Data page Basics:
+	8 KB = 8192 bytes
+	96 bytes = Page Header
+	~8096 bytes = Data + Slot Array
+
+Page Header fields:
+Field	        Description
+Page ID	        File ID + Page Number
+Page Type	Data, Index, IAM, PFS, GAM, SGAM, etc
+Object ID	Table/index owner
+Prev /Next Page Page chain links
+Free Space	Bytes free on page
+LSN	        Log sequence number
+Checksum	Page integrity
+
+Row Data field:
+Row Type	 Used For
+Fixed-length	 INT, DATETIME, CHAR
+Variable-length	 VARCHAR, NVARCHAR
+Null bitmap	 Tracks NULL columns
+Forwarded record Heaps only
+
+Slot array:
+Stores 2-byte pointers for each row
+Points to the starting position of each row on the page
+
+4) Leaf node in cluster index
+In SQL Server, indexes are organized as B-trees. Each page in an index B-tree is called an index node. The top node of the B-tree is called the root node. The bottom level of nodes in the index is called the leaf nodes. Any index levels between the root and the leaf nodes are collectively known as intermediate levels. In a clustered index, the leaf nodes contain the data pages of the underlying table. The root and intermediate level nodes contain index pages holding index rows. Each index row contains a key value and a pointer to either an intermediate level page in the B-tree, or a data row in the leaf level of the index. The pages in each level of the index are linked in a doubly-linked list.
+
+Clustered indexes have one row in sys.partitions, with index_id = 1 for each partition used by the index. By default, a clustered index has a single partition. When a clustered index has multiple partitions, each partition has a B-tree structure that contains the data for that specific partition. For example, if a clustered index has four partitions, there are four B-tree structures; one in each partition.
+
+5) Leaf-level node in non cluster index
+the leaf-level nodes of a non-clustered index are composed of index pages. The index pages of the Non-clustered index contain Non-clustered index key values with pointers to the storage location of these rows in the underlying heap table or the Clustered index.
+
+5.1) Cluster index vs non-cluster index?
+A clustered index determines the physical order of the data rows in the table based on the indexed column. Because the data is stored in sorted order, the table itself is essentially organized like the index.
+Key Characteristics
+	Orders the data rows physically on disk by the index key.
+	A table can have only one clustered index — since rows can’t be physically sorted in more than one way.
+	Usually created automatically on the PRIMARY KEY column unless you choose otherwise.
+	Best for range queries and operations that benefit from ordered data (e.g., BETWEEN, ORDER BY).
+
+A non-clustered index maintains a separate structure from the table data. It stores the indexed column values and pointers (row locators) to the actual data rows.
+Key Characteristics
+	Does not change physical row order. The table remains in its original storage order.
+	You can create many non-clustered indexes on a table to support different queries.
+	Each entry in the index includes the indexed column(s) plus a pointer to the row — either a RowID (if no clustered index) or the clustered key.
+	Ideal for speeding up specific lookups (e.g., queries filtered on columns other than the primary key).
+
+5.2) does NonCluster maintain a logical order
+No, non-clustered indexes maintain a logical order internally but do not dictate the table's physical row order.
+Logical Structure
+	Non-clustered indexes sort their own key values logically (e.g., ASC/DESC on multiple columns, hierarchically like clustered), but leaf nodes hold pointers (row locators) to actual data rows, which stay in the clustered index or heap order.
+Key Difference
+	Unlike clustered indexes, where physical data matches the index order, non-clustered indexes create a separate B-tree structure without rearranging table storage. This allows multiple non-clustered indexes per table, each with independent logical sorting optimized for specific queries.
+
+5.3) Does both clustered and non clustered index get fragmented?
+	Yes — both clustered and nonclustered indexes can get fragmented in SQL Server.
+	🔹 Clustered Index Fragmentation
+	👉 What gets fragmented?
+	The actual table data (because clustered index = data)
+	👉 Types:
+	Logical fragmentation → pages out of order
+	Internal fragmentation → free space inside pages
+
+	🔹 Nonclustered Index Fragmentation
+	👉 What gets fragmented?
+	The index structure only (not actual table data)
+	👉 Includes:
+	Key columns
+	Included columns
+	Row locators (RID or clustered key)
+
+5.2) Why can't move table by re-creating non cluster index?
+No — recreating (dropping + creating) a non-clustered index will not move the actual table rows or the table’s physical storage. A non-clustered index is a separate structure from the table data, and rebuilding it only affects that index’s pages, not the table’s data pages.
+
+6) How many tempdb files?
+It's not entirely true that there is nothing wrong with this suggestion. Yes the recommendation is for multiple tempdb files based on # of CPUs. However even the older recommendations do not suggest an exact 1:1 unless you have a small number of CPUs, say 8 or less. After that its more like 1:4 or even 1:8.
+
+7) What is collation ?
+Collations in SQL Server provide sorting rules, case, and accent sensitivity properties to data.
+
+8) how to handle expensive Key Lookups?
+We warn about these when a single Key Lookup is >=50% of the total plan cost.
+
+A key lookup occurs when SQL uses a nonclustered index to satisfy all or some of a query’s predicates, but it doesn’t contain all the information needed to cover the query. This can happen in two ways: either the columns in your select list aren’t part of the index definition, or an additional predicate isn’t.
+
+Key Lookups effectively join the nonclustered index back to the clustered index, on the clustered index key columns to retrieve the necessary information.
+
+This is what a Key Lookup operator looks like. Key Lookups are always tied to Nested Loops Joins, executing once for each row that needs to be retrieved. This can be especially painful in instances of parameter sniffing, when a clustered index scan would have been more appropriate.
+
+To find which columns are needed to fix it, hover over it and look at the output list of execution plan: look at number of execution (will be more) and estimated number of execution (this will be less) and look at the out output column add this into include option 
+
+8.1) How to reduce key lookup÷
+If the query frequently does:
+
+SELECT OrderDate, Status, Amount
+FROM Orders
+WHERE CustomerID = 100;
+
+you could create:
+
+CREATE NONCLUSTERED INDEX IX_Orders_CustomerID
+ON Orders(CustomerID)
+INCLUDE (OrderDate, Status, Amount);
+
+Now the index contains everything needed:
+
+IX_Orders_CustomerID
+       |
+   CustomerID
+       |
+   OrderDate
+   Status
+   Amount
+
+So SQL Server can potentially do:
+
+Index Seek
+    ↓
+Return data
+
+with no Key Lookup. This is called a covering index. Microsoft specifically recommends using INCLUDE for columns needed by the query but not needed for searching, sorting, or joining.
+
+
+
+8.1) Benefits ion include index?
+In Microsoft SQL Server, an INCLUDE index means adding non-key columns to a nonclustered index using the INCLUDE clause.
+
+This helps create a covering index, allowing SQL Server to return all required columns directly from the index without going back to the base table.
+Normal Nonclustered Index
+
+Example:
+	CREATE INDEX IX_Employee_Department
+	ON Empl	oyees (DepartmentID);
+	DepartmntID is the key column.
+	Index is sorted by DepartmentID.
+
+If query is:
+
+SELECT DepartmentID, EmployeeName
+FROM Employees
+WHERE DepartmentID = 10;
+
+SQL Server may:
+	Use index to find matching rows
+	Go back to clustered table/heap to fetch EmployeeName
+
+This extra lookup is called:
+	Key Lookup (clustered table)
+	RID Lookup (heap)
+
+These lookups can become expensive.
+INCLUDE Index
+	CREATE INDEX IX_Employee_Department
+	ON Employees (DepartmentID)
+	INCLUDE (EmployeeName);
+
+Now the index contains:
+Key column → DepartmentID
+Included column → EmployeeName
+
+The query can be satisfied entirely from the index.
+
+Benefits:
+	Avoid Key Lookups
+	Improves Query Performance
+	Smaller Index Keys
+		Index remains narrower
+		Better storage efficiency
+		Faster index maintenance	
+	Can Include Large Columns
+		Key columns have limits:
+		Maximum 1700 bytes
+		Maximum 32 key columns
+	Included columns do not count toward these limits.
+
+8.1) Best practices for creating index for large columns?
+Index key limitations
+For nonclustered indexes:
+	Maximum key size: 1700 bytes
+	Maximum key columns: 32
+
+For cluster index:
+Maximum key size = 900 bytes (clustered)
+MAX datatypes can store up to 2 GB
+
+Large datatypes like:
+	VARCHAR(MAX)
+	NVARCHAR(MAX)
+	TEXT
+	NTEXT
+	XML
+
+cannot be used directly as index key columns.
+
+Best Practices
+Avoid indexing very wide columns directly
+
+Instead:
+
+	Use INCLUDE
+	Computed columns
+	Full-text indexing	
+	Hashing
+
+8.2) What is computed column?
+In Microsoft SQL Server, a computed column is a column whose value is automatically calculated from other columns in the same table.
+You do not manually insert values into a computed column. SQL Server derives the value using an expression.
+
+If you want to search for the first 100 character 
+Create smaller derived column:
+	ALTER TABLE Documents
+	ADD ContentPrefix AS LEFT(Content, 100);
+
+Then create index:
+	CREATE INDEX IX_ContentPrefix
+	ON Documents(ContentPrefix);
+
+
+9) Why parallel session not used for inserting data into a defined table
+A parallel session is typically not used for inserting data into a defined table in SQL because the nature of an insert operation often involves sequential writing to the table, making it difficult to effectively parallelize, especially if the target table has indexes or constraints that need to be maintained; most database systems prioritize data integrity over potential performance gains from parallel inserts in such scenarios
+
+9.1) What are defined tables?
+In SQL Server, people usually say “defined table” to mean one of two things:
+Table Variable (defined in code) --> A table variable is a table you define and use inside a batch, stored procedure, or function.
+User-Defined Table Type (UDTT) --> A User-Defined Table Type is a table structure you define at the database level and reuse.This is NOT a data table. It’s a schema (template) for a table structure.
+
+9.2) How Parallel Insert behaves?
+1. Heap (no clustered index)
+	Parallel insert works easily
+	Multiple threads insert into different pages
+	Minimal contention
+
+2. Table with Clustered Index
+Parallel insert is possible, but depends on conditions.
+
+👉 Works when:
+Insert is bulk-based (not row-by-row)
+
+Examples:
+INSERT INTO TargetTable
+SELECT * FROM SourceTable;
+Query plan shows Parallelism (Distribute Streams)
+
+Limited / Disabled when:
+	Insert is row-by-row (OLTP)
+	Clustered index key is sequential (e.g., IDENTITY)
+	High contention on the last page
+👉 Reason:
+
+All threads try to insert into the same page (last page hotspot)
+
+🔹 When Parallel Insert Works Well with Clustered Index
+✅ Good scenarios:
+Non-sequential key (e.g., random values), not identity enabled
+Bulk load with:
+TABLOCK hint
+Partitioned tables (different partitions per thread)
+
+10) What is cardinality?
+In SQL (Structured Query Language), the term cardinality refers to the uniqueness of data values contained in a particular column (attribute) of a database table. The lower the cardinality, the more duplicated elements in a column.
+
+11) SQL Server storage configuration best practices:
+Create a separate volume for data and transaction log files
+Enable read caching on the data file volume
+Don't enable any caching on the log file volume
+Plan for an extra 20% of IOPs and throughput when building your storage for your VM to handle workload peaks
+Use the D: drive (the locally attached SSD) for TempDB files because TempDB is recreated upon server restart, so there's no risk of data loss
+Enable instant file initialization to reduce the impact of file-growth activities.
+Move trace file and error log directories to data disks
+For workloads requiring storage latency under 1 millisecond, consider using Ultra disk over Premium SSD.
+
+12) Pagelatch vs pageiolatch
+PAGELATCH is used for synchronizing access to pages already in memory, while PAGEIOLATCH is used for synchronizing access to pages when they are being read from or written to disk
+
+Wait Type	Problematic Component	                                Indicates
+PAGELATCH_XX	Contention on the Page Structure (a logical problem)	A thread is waiting for another thread to release the latch on a page already in the Buffer Pool (memory). It's a concurrency issue.
+
+PAGEIOLATCH_XX	I/O Subsystem Slowness (a physical problem)	        A thread is waiting for a page to be read from disk into the Buffer Pool. It indicates that the disk subsystem is slow, under pressure, or memory is insufficient.
+
+
+13) Commit vs checkpoint
+In SQL, commit and checkpoint are distinct operations related to data persistence and recovery, but not interchangeable. A commit is a user-initiated command that makes all changes within a transaction permanent and visible to other users. A checkpoint is a database-initiated process that periodically flushes modified data pages (dirty pages) and transaction log information from memory to disk. 
+
+14) How table is stored in sql?
+tables are not stored directly as single files in the data file. Instead, they are physically stored as data pages within a database file. Data pages are the fundamental unit of storage, and they are organized into a tree-like structure. 
+
+14.1) Is heap is not stored as a B-tree in SQL Server.
+A heap is simply a table without a clustered index.
+
+👉 Data is stored:
+	In no logical order
+	Just wherever space is available (based on allocation)
+
+❌ Heap
+No root / intermediate / leaf levels
+No ordered structure
+Uses:
+IAM pages → to track where data exists
+PFS/GAM/SGAM → for space management
+
+👉 Think: unordered pile of pages
+
+15) Memory pressure will lead to high CPU usage?
+Yes, memory pressure in a SQL Server environment can definitely lead to increased CPU usage. When memory is scarce, SQL Server might have to swap data between RAM and disk (page swapping), which is a CPU-intensive process. Additionally, when SQL Server needs to retrieve data from disk due to memory constraints, the CPU has to work harder to process the data. 
+
+15.1) What causes memory pressure?
+Common causes of memory pressure in SQL Server (and similar RDBMSs):
+Query/workload related
+
+	Large sorts, hash joins, or aggregations (ORDER BY, GROUP BY, DISTINCT) that request big memory grants
+	Missing or poor indexes forcing table/index scans that pull large amounts of data into memory
+	Ad-hoc/non-parameterized queries bloating the plan cache
+	Excessive parallelism — many queries getting parallel memory grants simultaneously
+	Large or inefficient temp table/table variable use, spilling to tempdb
+	Long-running or blocking transactions holding memory and locks
+
+16) What kind of quaries will cause high CPU usage?
+Queries that can lead to high CPU usage in SQL are those that require a lot of processing power, such as complex queries, full table scans, or queries that lack proper indexing. Additionally, queries that frequently trigger compilation or recompilation of the execution plan can also contribute to high CPU consumption. 
+
+17) Why do we have OLTP and OLAP?
+Smaller databases tend to have a tolerance for write and read operations to happen at the same time. However, in large-scale databases, you're forced to sacrifice the performance of reads to allow high-performance write operations—or sacrifice performance of writes to allow for high-performance read operations. The solution is to optimize your OLTP database for write operations and create a second database optimized for read operations. This second database is an OLAP database, commonly referred to as a data warehouse.
+
+18) When select statement will block write?
+In SQL Server, by default: A SELECT acquires Shared (S) locks. An INSERT/UPDATE/DELETE needs Exclusive (X) locks.S and X locks are incompatible → So if a SELECT holds shared locks long enough, a write might be blocked.
+Key Point: In default READ COMMITTED, shared locks are released immediately after the row is read. But in other isolation levels, they may be held longer.
+Higher Isolation Levels, REPEATABLE READ or SERIALIZABLE causes SQL Server to hold shared locks on the rows (or even range locks) until the transaction ends, which blocks writers.
+
+19) Len() vs Datalength()
+Len(): Returns the number of characters in a string, excluding any trailing spaces.
+Datalength(): Returns the number of bytes used to represent an expression.
+For single-byte character sets (like varchar), DATALENGTH() and LEN() will often return the same value. However, for Unicode data types (like nvarchar or nchar), DATALENGTH() will return twice the value of LEN() because each character is stored using 2 bytes.
+
+20) Maximum column size?
+CHAR, NCHAR, VARCHAR, NVARCHAR --> The maximum size is typically limited by the 8,060-byte maximum row size for in-row storage. For example, VARCHAR(8000) and NVARCHAR(4000) are common maximums for these types when stored directly within the 8KB page limit.
+VARCHAR(MAX), NVARCHAR(MAX), VARBINARY(MAX) --> These data types can store data up to 2 GB. When the data exceeds the 8,060-byte in-row limit, SQL Server automatically moves the data to off-row storage, storing only a 24-byte pointer in the main record
+
+20.1) what is off-row storage?
+In SQL Server, a data row must fit inside a single 8 KB page (max ~8060 bytes for row data). VARCHAR(MAX) can store up to 2 GB, so SQL Server cannot always keep it inside the main data row. When the VARCHAR(MAX) value is too large, SQL Server stores it outside the data page — this is called off-row storage.
+
+21) Compile vs runtime error?
+Compile-time errors (like a table not existing) are detected by SQL Server's parser before the code is executed. The batch is aborted, and the CATCH block is never entered.
+Runtime errors (like a data type conversion error or a division by zero) happen during execution. These are the errors that the TRY...CATCH block is designed to handle.
+
+22) How convert to hexa value, add 0X as prefix
+If the value is in varchar, then convert to varbinary. This will add 0x in the front
+
+23) A small log file growth leads to many Virtual Log Files (VLFs)?
+A small log file growth leads to many Virtual Log Files (VLFs) because each auto-growth event for the transaction log allocates new space divided into VLF units, so frequent, small growth events result in a proliferation of small VLFs, which degrades performance during backups, restores, and recovery processes. 
+
+24) How to reduce Last-Page Insert Contention (PAGELATCH_EX)
+
+This usually occurs when you have a monotonically increasing clustered index key (like an IDENTITY column or a datetime of insertion) on a frequently inserted table. All new rows must go to the very last page of the index, creating a severe bottleneck.
+
+Change the Index --> Change the clustered index from the sequential key (e.g., IDENTITY) to a column that distributes inserts more randomly, such as a Non-Sequential GUID or a hashed value.
+Non-Clustered Primary Key --> Convert the IDENTITY column to a non-clustered primary key, and create a non-unique clustered index on a different column, or no clustered index (a Heap).
+Use OPTIMIZE_FOR_SEQUENTIAL_KEY	--> Apply this index option to the sequential index. It changes the internal latching mechanism to reduce contention and increase throughput.
+Table Partitioning --> Partition the table using a key that directs inserts to different partitions. For example, partition by date if your inserts are high-volume and span multiple dates.
+Adjust Fill Factor --> Set a lower FILL FACTOR (e.g., 70-90) when creating or rebuilding the index to leave more free space on data pages, delaying the need to latch and allocate new pages.
+
+25) What is N prefix before a single-quoted?
+When you put the N prefix immediately before a single-quoted string literal, you are explicitly telling SQL Server to treat that string as an NVARCHAR data type (Unicode), rather than a standard VARCHAR (non-Unicode) data type.
+
+26) Implicit vs explicit 
+Implicit --> Implicit conversion is when the database engine (like SQL Server) automatically converts a value from one data type to another without the user explicitly asking for it.
+Explicit --> Explicit conversion is when you, the user, force the conversion using a built-in function like CAST or CONVERT.
+
+26.1) When Implicit conversion happens?
+✅ 1. In WHERE clause (very common)
+SELECT * 
+FROM Employees 
+WHERE EmployeeID = '100';
+EmployeeID → INT
+'100' → VARCHAR
+
+👉 SQL Server converts '100' → INT (because INT has higher precedence)
+
+✅ 2. In JOIN conditions
+SELECT *
+FROM Orders o
+JOIN Customers c
+  ON o.CustomerID = c.CustomerID;
+
+If:
+
+o.CustomerID = INT
+c.CustomerID = VARCHAR
+
+👉 One side will be implicitly converted
+
+27) varchar vs nvarchar
+varchar:
+	stores non-Unicode data (standard 8-bit ASCII/ANSI characters). 
+	It stores English letters, numbers, basic symbols.
+	t-sql: 'Hello World'
+nvarchar:
+	stores Unicode data (a wider range of global characters).
+	Practically any character from any language (Chinese, Arabic, Cyrillic), plus emojis (😀), mathematical symbols, etc.
+	N'Hello World' (Note the prefix!)
+
+28) char vs varchar
+Character data types that are either fixed-size, char, or variable-size, varchar
+
+29) What is BLOB?
+SQL Server is primarily designed to store structured data (numbers, short text strings, dates). However, sometimes you need to store unstructured data—files that the database engine cannot interpret or query inside of.
+Examples: Images, Documents, audio and video
+Data types: VARBINARY(MAX) --> TRUE BLOB, can store up to 2GB	
+		VARCHAR(MAX) , NVARCHAR(MAX)
+
+30) How select query leverage hash search?
+If the search is based on allheader. Rather than searching for large allheader data in database, calculate the hash value for the allheader first then search the data using the generated hash value. 
+
+31) Type of isolations?
+
+1. READ UNCOMMITTED
+Behavior
+	Can read uncommitted (dirty) data
+	No shared locks taken
+	Ignores exclusive locks
+
+Issues Allowed
+	Dirty reads
+	Non-repeatable reads
+	Phantom reads
+
+2. READ COMMITTED (Default)
+Behavior
+	Reads only committed data
+	Takes shared locks
+	Releases locks immediately after reading
+
+Issues Allowed
+	Non-repeatable reads
+	Phantom reads
+	Prevents dirty reads
+
+3. REPEATABLE READ
+Behavior
+	Keeps shared locks on rows it reads until transaction ends
+	Prevents other transactions from modifying those rows
+	Issues Prevented
+
+Dirty reads
+	Non-repeatable reads
+	Issues Allowed
+	Phantom reads
+
+4. SERIALIZABLE
+Behavior
+
+	Most strict locking-based level
+	Locks ranges of keys
+	Prevents inserts/updates in the range
+
+Issues Prevented
+	Dirty reads
+	Non-repeatable reads
+	Phantom reads
+Impact
+
+	Lowest concurrency
+	Highest blocking risk
+
+5. SNAPSHOT
+Behavior
+
+	Uses row versioning
+	Reads from version store in tempdb
+	No blocking between readers and writers
+
+Issues Prevented
+
+	Dirty reads
+	Non-repeatable reads
+	Phantom reads
+
+Requirements: Must be enabled at database level:
+
+Special Mode: READ COMMITTED SNAPSHOT (RCSI)
+
+This replaces default READ COMMITTED behavior with row versioning instead of locks. This is good for read heavy OLTP
+
+What is phantom read?
+	A phantom read in SQL Server happens when a transaction re-executes a query and finds new or missing rows because another transaction inserted, updated, or deleted rows that match the query condition.
+
+31.1) What to consider before enabling RCSI?
+
+tempdb size (data files + log) --> pre-size tempdb, add multiple data files
+Disk IOPS & latency
+Multiple data files configured
+
+31.2) Read and write process for row version 
+The "Copy-on-Write" Process
+Here is the step-by-step sequence of events when a row is updated under row versioning:
+Scenario: A row currently says the 'Status' is 'Active'. Transaction T1 wants to change it to 'Inactive'.
+The Setup: Transaction T1 begins an UPDATE statement.
+The Copy: Before SQL Server touches the "live" row on the actual data page, it takes a snapshot copy of the row precisely as it looks right now (Status = 'Active').
+The Move: It pushes this old copy into the Version Store in tempdb.
+The Update: Now, SQL Server updates the "live" row on the actual data page to 'Inactive'.
+The Link: Crucially, in the hidden header of the new "live" row, SQL Server stamps it with T1's Transaction ID and creates a pointer link back to the old version sitting in tempdb.
+
+The Read Process: How Readers Find the Right Data
+It depends on the Transaction Isolation Level you have chosen. There are two main ways to turn on row versioning:
+
+Mode 1: Read Committed Snapshot Isolation (RCSI)
+How most modern applications are configured.
+The Rule: "Show me the latest committed version of the data as it existed at the start of my current statement."
+How it works:
+Your query tries to read the live row.
+It checks the hidden Transaction ID on the live row. Is that transaction still active (uncommitted)?
+Yes (Active): I can't read this dirty data. I must follow the pointer link to tempdb. I'll check the version there. Was that transaction committed before my statement started? If yes, read it. If no, follow the link deeper into tempdb.
+No (Committed): Great, I'll read the live row.
+
+Mode 2: Snapshot Isolation (SI)
+
+31.3) How Version Store Cleanup works?
+SQL Server has a background process called the Version Store Cleanup thread runs every minute. It looks at all active transactions in the entire instance. It finds the oldest active transaction. It knows that no query can possibly need a row version older than the start time of that oldest transaction.
+
+32) ACID property
+
+A - Atomicity (The "All-or-Nothing" Rule) --> The database uses a Transaction Log. Before changing the actual data, it writes notes about what it intends to do. If a crash happens mid-transaction, when the server restarts, it looks at the log, sees unfinished business, and runs a "UNDO" phase to roll back incomplete changes.
+C - Consistency (The "Follow the Rules" Rule) --> Consistency ensures that a transaction can only bring the database from one valid state to another valid state.
+I - Isolation (The "Personal Bubble" Rule) --> In the real world, many users are accessing the database simultaneously. Isolation ensures that concurrently running transactions do not interfere with each other.
+D - Durability (The "Written in Stone" Rule) --> Durability guarantees that once a transaction has been successfully "Committed" (the client gets the "OK" message), that change is permanent. Even in the event of a catastrophic system failure—a power outage, an OS crash, or a hardware failure—immediately after the commit, the data will still be there when the system comes back online.
+
+
+33) Encryptions
+Feature	         Protects Against	         Where Decryption Happens	Requires Code Changes?	Can DBA see data?
+TLS	         Network sniffing	         Client & Server endpoints	No	                Yes (once received)
+TDE	         Physical Drive Theft	         Server Memory (RAM)	        No	                Yes
+Column Level	 Casual user access	         Server Memory (RAM)	        Yes (T-SQL calls)	Yes (if high privilege)
+Always Encrypted Sysadmins/DBAs/Cloud Providers	 Client Machine Memory	        No (Driver handles it)	No
+
+35) Enabling Table partition for existing table
+SQL Server Edition: Historically an Enterprise feature, basic table partitioning is available in Standard Edition starting with SQL Server 2016 SP1. However, advanced features like online index rebuilds (crucial for minimizing downtime during this process) remain Enterprise-only.
+The Strategy: The only way to partition an existing table is to rebuild its Clustered Index onto a partition scheme.
+The Constraint: The column you choose to partition by (e.g., OrderDate) must be included in the table's Primary Key/Clustered Index definition. If it isn't currently, you will have to redefine your Primary Key.
+Transaction Log Impact: This operation moves huge amounts of data. Ensure your transaction log drive has substantial free space, and consider switching to SIMPLE recovery mode temporarily if your RPO allows it.
+Downtime: While Enterprise Edition allows ONLINE = ON for index rebuilds, partitioning an existing table often requires schema locks that will block applications. Plan for a maintenance window.
+
+steps:
+	1) Prepare Filegroups and Files
+	2) Create the Partition Function
+	3) Create the Partition Scheme
+	4) The Big Move (Rebuilding the Clustered Index): The Challenge: Our current Primary Key is just on OrderID. To partition by OrderDate, the partitioning column must be part of the clustered index key. We have to drop the existing PK/Clustered Index and recreate it as a composite key (OrderID, OrderDate) on the new partition scheme.
+	5) Verification
+
+36) VLF structure
+A Virtual Log File (VLF) is a segment inside the physical SQL Server transaction log file. The number and size of VLFs depend on the size of the log file growth increment. For example:
+Small growth → fewer, smaller VLFs
+Large growth → fewer, larger VLFs
+Having too many VLFs can slow down database recovery, make backups/restores slower, and negatively affect operations that scan the log — because SQL Server processes VLFs sequentially.
+growth size set for Log --> 8Gb, for data --> 10GB
+
+37) Troubleshoot might VLF issue?
+Diagnose Why VLFs Are High
+	The transaction log auto-growth is set to a small size (like 1 MB or small %), creating many tiny VLFs over time.
+	Frequent small growth events (especially with percentage growth) create more VLFs with each growth.
+
+Solution:
+	Backup the transaction log (if database is in full or bulk-logged recovery).
+	Shrink the log file to the smallest possible size.
+	grow the log back up to an appropriate size in one or a few large chunks:
+
+38) Data modeling
+1) Conceptual Data Model:
+	To capture the high-level business requirements and the relationships between real-world entities
+	Entities: The main objects you need to store data about (e.g., Customer, Product, Order).
+2) Logical Data Model
+	Goal: To translate the conceptual model into a structure that can be implemented in a relational database, but is still independent of a specific database system (like SQL Server).All Entities and Relationships: Refined from the conceptual model.
+
+	Attributes: The specific data points for each entity (e.g., Customer entity has attributes like FirstName, LastName, Email).
+	Primary Keys (PK): Unique identifiers for each entity.
+	Foreign Keys (FK): Attributes that create links between entities.
+	Normalization: The process of organizing data to reduce redundancy (explained below).
+
+3) Physical Data Model (SQL Server Specific)  
+	Table Names: Often following a naming convention (e.g., Sales.Customer, Production.Product).
+	Column Names: Also following a convention (e.g., CustomerID, FirstName).
+	SQL Server Data Types: Choosing the precise type (e.g., INT, BIGINT, VARCHAR(100), NVARCHAR(50), DATETIME2, DECIMAL(18,2)). This is a critical step for performance and storage.
+	Constraints: Rules enforced by SQL Server (e.g., NOT NULL, UNIQUE, CHECK, DEFAULT).
+	Indexes: Structures to speed up data retrieval (Clustered and Non-Clustered).
+	Storage Details: Filegroups, partitioning schemes, etc.
+
+Entity and Attributes are part of logical model
+Table and columns are part of physical model
+
+We have used Erwin data model tools for data modelling
+
+39) Types of Normalisation?
+🔹 1NF (First Normal Form)
+👉 Rule: 
+	No repeating groups
+	Each column must have atomic (single) values
+🔹 2NF (Second Normal Form)
+👉 Rule:
+	Must be in 1NF
+	No partial dependency (columns must depend on full primary key)
+Problem example (composite key):
+OrderID	ProductID	ProductName
+ProductName depends only on ProductID ❌
+Fix:
+	Move ProductName to a separate table
+🔹 3NF (Third Normal Form)
+👉 Rule:
+	Must be in 2NF
+	No transitive dependency
+👉 Meaning:
+	Non-key column should not depend on another non-key column
+	(Example you already saw: DeptName depending on DeptID instead of primary key)
+
+Normal Form.  Removes
+1NF	       Repeating data
+2NF	       Partial dependency
+3NF	       Transitive dependency
+BCNF	       Advanced dependency issues
+4NF	       Multi-valued dependency
+5NF	       Join dependency
+
+
+40) Types of indexes?
+1. Clustered Index
+	Determines the physical order of rows in a table based on the indexed key.
+	A table can have only one clustered index because data can be sorted in one order.
+	Often created automatically by defining a PRIMARY KEY.
+When to use:
+	Good for range queries and sorting large sets of records.
+
+2. Non-Clustered Index
+
+	A separate structure that stores the indexed columns and pointers to the actual data rows.
+	A table can have multiple non-clustered indexes.
+	Does not affect the physical order of data.
+
+When to use:
+	Great for speeding up searches on specific columns and join operations.
+
+3. Unique Index
+	Ensures that the indexed column(s) contain no duplicate values.
+	Can be clustered or non-clustered.
+	Created automatically when you define UNIQUE or PRIMARY KEY constraints.
+
+When to use:
+	Enforcing uniqueness guarantees and improving lookup performance.
+
+4. Filtered Index
+	A non-clustered index with a WHERE clause to index only a subset of rows.
+	Reduces index size and maintenance overhead.
+
+Example use:
+	Indexing only active or frequently queried records.
+
+5. Columnstore Index
+	Stores data in a column-oriented format for high-performance analytic queries.
+	Excellent for data warehousing / OLAP workloads due to compression and batch processing.
+
+Variants:
+	Clustered Columnstore Index (CCI) — becomes the primary storage for a table.
+	Non-Clustered Columnstore Index (NCCI) — can exist alongside a traditional rowstore table.
+
+6. XML Index
+	Optimizes queries against columns of XML data type.
+	Uses special internal structures for fast XML node lookup.
+
+7. Spatial Index
+	Designed for spatial data types (e.g., geometry, geography).
+	Speeds up spatial queries (e.g., distance, intersections).
+
+8. Full-Text Index
+	Supports advanced text searches like CONTAINS and FREETEXT.
+	Useful when you need keyword or phrase search in large text fields.
+
+9. Indexes with Included Columns
+	A variation of non-clustered index where extra columns are added to the leaf level to make the index cover queries without being part of the key.
+	Improves performance for queries that select columns not in the key.
+
+10. Indexes on Computed Columns
+	SQL Server allows creating indexes on columns computed from expressions if they are deterministic and persisted.
+	Helps optimize queries that filter or sort on computed values.
+
+40.1) How filter index works?
+Instead of indexing the entire table, SQL Server stores index entries only for rows that match a WHERE condition.
+
+Example:
+CREATE NONCLUSTERED INDEX IX_ActiveUsers
+ON Users (UserName)
+WHERE IsActive = 1;
+
+👉 This index contains only rows where IsActive = 1
+👉 All other rows are ignored
+
+
+41) What is TDE
+TDE (Transparent Data Encryption) in Microsoft SQL Server is a built-in security feature that encrypts the database files and backups on disk
+SQL Server uses a hierarchy of keys and certificates:
+Service Master Key (SMK) – created automatically for the SQL Server instance.
+Database Master Key (DMK) – created in the master database and protected by the SMK.
+Certificate or Asymmetric Key – stored in the master database and used to protect the DEK.
+Database Encryption Key (DEK) – a symmetric key that encrypts the actual database files and logs.
+
+TDE → whole-database, at-rest only, transparent to apps, good for compliance (HIPAA, PCI-DSS "data at rest" checkboxes).
+Always Encrypted → column-level, protects data at rest and in transit/client-side, client driver decrypts → stronger for very sensitive columns but requires app changes.
+
+42) Delete/Truncate the Data in a Single Partition (Recommended in most cases)
+Since SQL Server 2016, you can truncate (instantly remove all rows from) a specific partition very efficiently — much faster than DELETE and with minimal logging.
+	TRUNCATE TABLE YourTableName WITH (PARTITIONS (3)); 
+
+42.1) Remove / Merge the Partition Boundary (Change Partition Structure)
+	ALTER PARTITION FUNCTION YourPartitionFunctionName() MERGE RANGE (20240101);
+	This moves all data from one partition into the neighboring one.
+	After merge, the number of partitions decreases by 1.
+	You can repeat this until you have only one partition left if desired.
+
+42.2) Completely Remove Partitioning from the Table (Optional)
+If you no longer want any partitioning:
+
+-- Option A: If table has clustered index (most common)
+CREATE CLUSTERED INDEX YourClusteredIndexName 
+    ON YourTableName(YourClusteringColumn)
+    WITH (DROP_EXISTING = ON)
+    ON [PRIMARY];   -- or any single filegroup
+This rebuilds the clustered index off the partition scheme → table is no longer partitioned.
+
+43) What is Switch partition?
+	Switch Partition is a metadata-only operation that allows you to instantly move a block of data (a partition) from one table to another.
+	The "magic" of a partition switch is that it does not move physical data. Instead, it simply reassigns the storage pointers from the source table to the target table. Because it is a metadata change, moving 100 million rows takes less than a second.
+The Two Most Common Scenarios
+	Switch In: Moving data from a non-partitioned "staging" table into a specific partition of a large partitioned table. (Used for fast data loading).
+	Switch Out: Moving a partition of old data out of a large partitioned table into a separate "history" or "archive" table. (Used for fast data archiving/deletion).
+The Strict Rules (Requirements)
+	Identical Schema, Indexes, Filegroup and check Constraint that exactly matches the boundaries of the partition it is switching into
+
+44) How partition switch works internally
+Internally, a partition switch is a pointer reassignment within the SQL Server system metadata. It is not a data movement operation; it is a "relabeling" of storage units.
+The Core Concept: HoBTs and Units
+Internally, SQL Server identifies physical storage containers as HoBTs (Heap or B-Tree).
+	When you create a non-partitioned table, it has exactly one HoBT.
+	When you create a partitioned table, it has one HoBT per partition.
+A partition switch tells the SQL Server engine: "Take the HoBT ID currently associated with Table A and give it to Table B."
+The Pointer Swap
+	It takes the Allocation Unit ID (the physical 8KB pages on disk) currently assigned to the source.
+	It updates the metadata to point that Allocation Unit to the target table's partition number.
+	It sets the source table’s pointer to NULL (marking it as empty).
+
+45) Heap vs B-Tree
+For a Heap: SQL Server MUST use the IAM for every search. Because rows in a heap are not linked and have no B-Tree, the only way the engine knows which pages belong to the table is by checking the IAM "map."
+For an Index: The B-Tree provides a path to the data. The IAM is just a secondary "inventory list" used for bulk maintenance or physical-order scans or index scan. Like heavily fragmented data
+
+Feature	                     Heap	                   Clustered Index (B-Tree)
+Data Order	              Unordered (Random)	    Ordered by the Clustering Key
+Page Linking	              Pages are not linked	    Double-linked list (Prev/Next)
+How to find data	      IAM Scan (Table Scan)	    B-Tree Seek or Scan
+Row ID	                      RID (File:Page:Slot)          The Clustering Key
+Empty Space	              Often leads to fragmentation  Managed via Fill Factor
+
+A Heap is a table without a clustered index.
+🔹 Logical Structure
+	Data rows are stored unordered
+	Pages are not linked in any logical key order
+	SQL Server uses a RID (Row Identifier) to locate rows
+	RID = File ID + Page ID + Slot Number
+
+🔹 How Data is Organized
+	Insert → Stored wherever free space is available
+	No sorting
+	No hierarchy
+	No root/intermediate/leaf structure
+
+B-Tree (Clustered Index)
+When you create a clustered index, SQL Server stores data using a B+ Tree structure.
+🔹 Logical Structure
+	It has three levels:
+	Root Page
+	Intermediate Pages
+	Leaf Pages
+
+45.1) Does NonClustered index uses Btree?
+Yes ✅ — in SQL Server, a nonclustered index also uses a B+ Tree structure (same logical structure as a clustered index).
+What is Stored at Leaf Level?
+👉 If table is a Heap
+Leaf level contains:
+	Indexed key columns
+	RID (Row Identifier) pointing to heap row
+	RID = File ID + Page ID + Slot Number (contain pointer to each row)
+
+
+46) How fill factor reduces page split
+To understand how Fill Factor reduces page splits, you have to visualize the difference between a "full room" and a "room with empty chairs."
+1. The Scenario: A Full Page (Fill Factor 100)
+By default, SQL Server tries to pack data as tightly as possible. Imagine an 8KB data page that is 100% full. It contains rows with IDs 10, 20, 30, 40, 50.
+If you try to insert a row with ID 25:
+	SQL Server looks at the page and realizes there is physically no room between ID 20 and ID 30.
+	Because the Clustered Index must keep data in logical order, it cannot just put ID 25 at the end of the table.
+	It is forced to perform a Page Split:
+	It allocates a brand new 8KB page.
+	It moves roughly half the rows (30, 40, 50) to the new page.
+	It finally inserts 25 into the original page.
+	It updates the pointers in the B-Tree to link these two pages.
+The Cost: This is a heavy I/O operation, causes index fragmentation, and creates a "gap" in the physical layout of your database.
+
+2. The Solution: The "Buffer" (Fill Factor 80)
+Now, imagine you rebuilt that index with a Fill Factor of 80. SQL Server leaves 20% of every page empty. That same page now has rows 10, 20, 30, 40 and empty space at the bottom.
+If you try to insert a row with ID 25:
+	SQL Server sees there is empty space available on the page.
+	It simply shifts the existing rows (IDs 30 and 40) down slightly within the page (a memory-only operation).
+	It inserts 25 into the gap.
+	No new page is created, and no B-Tree pointers need to be updated.
+The Result: The insert is nearly instantaneous and the index remains unfragmented.
+
+46.1) Does fillfator maintains this 20% gap forever?
+It is a common misconception that SQL Server maintains this 20% gap forever.
+	Fill Factor is only applied during an INDEX REBUILD or CREATE.
+	After the rebuild, as you keep inserting rows, that 20% gap will eventually fill up.
+	Once the gap is 100% full, the next insert will cause a page split again.
+This is why databases with high insert volumes require regularly scheduled index maintenance (rebuilds) to "reset" the Fill Factor gap.
+
+47) Fragmentation vs fill factor
+What is Fragmentation?
+Fragmentation occurs when the logical ordering of pages in an index doesn't match the physical ordering on the disk, or when there is a lot of "empty air" in your data pages.
+There are two main types:
+	External (Logical) Fragmentation: The pages in the B-Tree are no longer contiguous. Page 10 might point to Page 500 as its next page. This forces the disk head to jump around, killing performance for sequential reads (scans).
+	Internal Fragmentation: This is "wasted space." Your 8KB pages are only 60% full. This means SQL Server has to read 100 pages to get 60 pages' worth of data, wasting memory (Buffer Pool) and I/O.
+
+Fill Factor is a setting that tells SQL Server how much empty space to leave on each leaf-level page when an index is created or rebuilt.
+	Default (0 or 100%): SQL Server fills the pages completely. This is great for static data or tables that only ever get appended to at the end (like Identity columns).
+	Custom (e.g., 80%): SQL Server leaves 20% of every page empty.
+The Purpose of Fill Factor
+	The empty space acts as a buffer. If you have random inserts (like a GUID or a Name), the new rows can land in that 20% "free space" without triggering a costly Page Split.
+
+48) What is the cause of page split
+When you insert data into a full page in a Clustered Index, SQL Server can't just "push" the data down. It must:
+	Create a new page.
+	Move 50% of the data from the old page to the new one.
+	Insert the new row.
+	This process causes both internal and external fragmentation.
+
+49) How page splits occurs with non cluster index?
+In fact, non-clustered indexes (NCIs) are often more prone to page splits than clustered indexes because their keys are almost always "random" in nature.
+Here is why and how it happens:
+1. The Reason: Logical Ordering
+Just like a clustered index, a non-clustered index is a B-Tree structure. It must keep its keys in strict logical order.
+	If you have a clustered index on EmployeeID (sequential: 1, 2, 3...), it rarely splits because new data is just added to the end.
+	However, if you have a non-clustered index on LastName, and you insert a new employee named "Adams," SQL Server must squeeze that name into the "A" page of the index. If that page is full, it must split, even if the row was added to the end of the actual table.
+
+2. The Chain Reaction
+Every time you INSERT a row into a table, SQL Server has to go out and update every single non-clustered index on that table.
+If your table has 5 non-clustered indexes:
+	One insert occurs in the base table (Heap or Clustered Index).
+	Five separate B-Tree updates occur in the NCIs.
+	If any of the pages in those 5 indexes are full, you get a page split in that specific index.
+3. Updates are "Delete + Insert"
+Page splits in non-clustered indexes also happen during Updates.
+If you update a column that is part of a non-clustered index (e.g., changing a user's Email address), SQL Server has to:
+	Delete the old email from its logical position in the index B-Tree.
+	Insert the new email into its new logical position.
+If the page where the new email belongs is full, a page split occurs.
+
+49.1) Does page split happens for heap?
+Summary: page splits = index pages only (clustered + nonclustered). Heaps experience forwarded records instead.
+
+Why heaps don't split
+	A heap has no ordering and no linked-page list at the leaf level. Rows can go on any page with free space, tracked via PFS/IAM/GAM allocation pages. So when a row doesn't fit:
+
+INSERT — SQL Server just places the row on another page (an existing one with room or a newly allocated one). No split.
+UPDATE that grows a row beyond the page's free space — the row is moved to a new location and a forwarding pointer is left behind pointing to the new spot. This is forwarded records, not a page split.
+
+
+50) Table partition recommendations?
+a) Choose the RIGHT partition key (most important)
+✔ Best partition columns
+	Use columns that:
+	Are used in WHERE filters
+	Grow continuously
+	Support range queries
+
+Common good choices:
+	Date / datetime (most common)
+	Identity / increasing numeric key
+	Tenant ID (in multi-tenant systems)
+
+b) Always align clustered index with partition key
+Rule: Partition column MUST be part of clustered index.
+
+Best practice pattern:
+CLUSTERED INDEX (PartitionKey, UniqueKey)
+
+Why?
+	Enables partition elimination
+	Supports fast switching
+	Prevents non-aligned indexes
+
+c) Partition only LARGE tables
+Partitioning is not for small tables.
+Recommended threshold:
+Partition only if:
+	Table size > 50–100 GB
+	Millions/billions of rows
+	Heavy ETL workloads
+Otherwise:
+
+👉 Partitioning adds unnecessary overhead.
+
+d) Use RANGE RIGHT for date partitions
+Most production systems use:
+	PARTITION FUNCTION pf_DateRange (DATE)
+	AS RANGE RIGHT
+
+Why?
+	New data always goes into newest partition
+	Easier sliding window management
+
+e) Keep partitions evenly sized
+
+Avoid: One huge partition + many small ones
+
+Aim for:
+	Similar row counts
+	Similar storage usage
+
+This improves:
+	Query parallelism
+	Maintenance performance
+
+f) Use sliding window strategy
+Very common enterprise pattern.
+Steps:
+	Add new partition for new data
+	Load data
+	Switch out old partition
+	Archive/drop old partition
+
+Benefits:
+	No blocking
+	Fast data purge
+	Minimal logging
+
+51) what is sliding window in table partition?
+Sliding window in SQL Server partitioning is a data management technique used to efficiently:
+	Add new data
+	Remove old data
+	Without heavy locking or large delete operations
+It’s mainly used in large time-based tables (like logs, transactions, audit data).
+
+Step 1 — SPLIT: Add new partition
+Before new data arrives:
+	LTER PARTITION FUNCTION pf_Sales()
+	PLIT RANGE ('2026-03-01');
+This creates a new empty partition.
+
+Step 2 — Load new data
+New rows automatically go into the latest partition.
+No extra work needed.
+
+Step 3 — SWITCH + DROP old partition
+Instead of deleting:
+Move old partition to archive table:
+	LTER TABLE Sales SWITCH PARTITION 1 TO Sales Archive PARTITION 1;
+Then drop/archive it.
+
+52) How range and filegroup maps in partition?
+In SQL Server partitioning, range values do NOT directly map to filegroups.
+They map indirectly through a partition function and partition scheme.
+Think of it as a 3-step chain:
+	ange values → Partitions → Filegroups
+Let’s break this clearly 👇
+
+a) partition Function = Defines RANGE
+This decides which data belongs to which partition number.
+Example:
+	CREATE PARTITION FUNCTION pf_SalesDate (DATE)
+	AS RANGE RIGHT FOR VALUES
+	('2024-01-01', '2025-01-01', '2026-01-01');
+
+This creates 4 partitions:
+
+Partition	Data Range
+P1	< 2024-01-01
+P2	2024
+P3	2025
+P4	>= 2026
+
+Important:
+	Partition function ONLY defines ranges, NOT filegroups.
+
+b) Partition Scheme = Maps partitions to filegroups
+This is where actual storage mapping happens.
+Example:
+	CREATE PARTITION SCHEME ps_SalesDate
+	AS PARTITION pf_SalesDate
+	TO (FG_OLD, FG_2024, FG_2025, FG_CURRENT);
+
+Now mapping becomes:
+
+Partition	Range	Filegroup
+P1	   < 2024	FG_OLD
+P2	    2024	FG_2024
+P3	    2025	FG_2025
+P4	   >= 2026	FG_CURRENT
+
+This is the key mapping step.
+
+c) Table uses the scheme
+
+Finally:
+CREATE TABLE Sales
+(
+    OrderID INT,
+    OrderDate DATE
+)
+ON ps_SalesDate(OrderDate);
+
+Now data automatically goes to correct filegroup.
+
+53) Enable partition to existing table?
+a) Create Filegroups (optional but recommended)
+b) Create Partition Function
+c) Create Partition Scheme
+
+Convert existing table to partitioned table
+	Table already has clustered index: You must drop & recreate it:
+
+Table is a heap (no clustered index): 
+	Just create a clustered index:
+
+What happens internally When you create clustered index on scheme:
+
+SQL Server:
+1. Reads all rows
+2. Determines partition using function
+3. Moves data into correct filegroup
+
+Important production notes:
+Operation can be long for large tables
+Because:
+	Full table rebuild
+	Heavy IO
+
+Can use ONLINE option (Enterprise Edition), Prevents blocking.
+Partition column MUST be part of clustered index, Otherwise SQL Server will not allow alignment.
+
+54) Sample partition table in Smarsh
+
+DB Name: MessageDataDupeProcessing
+DB Size: 275TB
+Number of Partitioned table: 4 
+Max mount point size: 40TB
+Number of row: 186 Billion
+Biggest table size: 202 TB
+
+55) Can we create table on multiple filegroup?
+1. The Standard Case: No
+For a standard, non-partitioned table, the answer is No.
+A table (and its clustered index, which is the table) can only be assigned to a single filegroup at any given time. This is defined in the ON [FilegroupName] clause when you create the table. All data pages for that table will be stored within the files belonging to that specific filegroup.
+
+2. The Partitioned Case: Yes
+For a partitioned table, the answer is Yes.
+This is the primary way to spread a single table across multiple filegroups. When you use Table Partitioning, you map different ranges of data to different filegroups via a Partition Scheme.
+
+Non-Clustered Indexes: You can place the Clustered Index (the table data) on [Filegroup_A] and its Non-Clustered Indexes on [Filegroup_B]. This is a common strategy to spread I/O load across different physical disks.
+
+LOB (Large Object) Data: If your table has VARCHAR(MAX), VARBINARY(MAX), or XML columns, you can use the TEXTIMAGE_ON clause to store that heavy "blob" data on a separate filegroup, while the regular "thin" rows stay on the primary filegroup.
+
+56) on which filegroup need tp create cluster and non cluster index for partitioned table?
+1. The Clustered Index (Must be Aligned)
+The Clustered Index is the table. Therefore, it must be created on the Partition Scheme, not a single filegroup.
+Where to create it: On the PartitionSchemeName(PartitionColumn).
+Result: This tells SQL Server to spread the actual data rows across the different filegroups defined in your scheme (e.g., Year 2023 data on FG2023, Year 2024 on FG2024).
+Requirement: The partitioning column must be part of the clustered index key.
+
+2. Non-Clustered Indexes: Two Choices
+Option A: Aligned Index (Best Practice for Data Management)
+An aligned index uses the same partition scheme and partition column as the base table.
+Where to create it: On the same PartitionSchemeName(PartitionColumn). Add partition column in include option 
+Why choose this? * Partition Switching: You can only use SWITCH PARTITION (instant data moving) if all non-clustered indexes are aligned.
+Maintenance: 
+	You can rebuild or reorganize a single partition of the index without touching the rest of the table.
+Automatic Alignment: 
+	If you don't specify a filegroup or scheme when creating an NCI on a partitioned table, SQL Server will align it to the base table by default.
+
+Option B: Non-Aligned Index (Special Use Cases)
+A non-aligned index is created on a single filegroup (like [PRIMARY] or a dedicated [INDEX_FG]), regardless of how the table is partitioned.
+Where to create it: On [FilegroupName].
+Why choose this?
+Global Uniqueness: 
+	If you need a UNIQUE index on a column that is not the partitioning column, it cannot be aligned. It must be non-aligned so SQL Server can enforce uniqueness across the entire table.
+Small Queries: 
+	If a query doesn't use the partitioning key, a non-aligned index can sometimes be faster because SQL Server only has to search one B-tree instead of "poking" into 1,000 different partition B-trees.
+
+57) How to use table as queue?
+In systems without a dedicated message broker (like RabbitMQ, Kafka, Service Bus), people often implement a queue using a regular SQL Server table. Each row represents a queued task or message.
+This is good for simple workloads, but can become tricky under heavy concurrency.
+📋 Typical Queue Table Design, A simple queue table might look like this:
+
+CREATE TABLE dbo.QueueTable
+(
+    ID INT IDENTITY(1,1) PRIMARY KEY,
+    Payload VARCHAR(500),
+    Status TINYINT NOT NULL DEFAULT(0),  -- 0 = waiting, 1 = processing
+    CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+ID – unique row ID and ordering key.
+Payload – message or task data.
+Status – tracks whether a row is pending (0) or being processed (1).
+
+✅ Enqueue (Add Item)
+Just insert rows like a normal table:
+INSERT INTO dbo.QueueTable (Payload)
+VALUES ('Task A'), ('Task B'), ('Task C');
+
+🟡 Dequeue (Get & Lock Next Item)
+You want two things when dequeuing: Only one worker picks a task, and Other workers skip locked rows to avoid collisions.
+SQL Server hints help:
+Hint	    Purpose
+UPDLOCK	    Locks the row for update until transaction ends
+READPAST    Skips rows already locked by other transactions
+
+58) Table based queue vs SQL Broker
+
+Feature	                  Table Queue	Service Broker
+Setup complexity	  Very low	Medium/High
+Reliability	          Manual	Built-in
+Retry handling	          Manual	Automatic
+Ordering guarantee	  Custom logic	Guaranteed
+Poison message handling	  Manual	Automatic
+Performance (high load)	  Moderate	Better
+Cross-database messaging  Custom	Native
+Cloud-friendly	          Yes	        Limited
+
+60) How to use kafa with SQL Server
+1️⃣ Kafka Connect JDBC Sink (Most Common / No Custom Code)
+Use:
+Kafka Connect, It has a JDBC Sink Connector that writes Kafka messages into SQL Server.
+
+🔹 Architecture
+Kafka Topic
+     ↓
+Kafka Connect JDBC Sink
+     ↓
+SQL Server Table
+
+🔹 How It Works
+	Messages arrive in Kafka topic
+	JDBC Sink reads messages
+	Converts message to row
+	Executes INSERT/UPSERT into SQL Server
+	Commits offset after successful write
+If SQL insert fails:
+	Offset is not committed
+	Message is retried
+
+2️⃣ Custom Consumer Application (.NET / Java)
+Very common in enterprise systems.
+🔹 Architecture
+Kafka
+  ↓
+Consumer App (.NET/Java)
+  ↓
+SQL Server
+
+How It Works:
+	App subscribes to topic
+	Polls messages
+	Processes message
+	Inserts into SQL Server
+	Commits offset only after DB success
+
+61) Does SQL server support semi structured and unstructured data?
+The short answer is: Yes, but not in the same way a NoSQL database (like MongoDB) does. SQL Server is a "Relational-First" database, but it provides several specialized features to store and query unstructured or semi-structured data.
+Here is how SQL Server handles the "Unstructured" world:
+
+1. Semi-Structured Data: JSON and XML
+This is the most common form of "unstructured" data in SQL.
+JSON: SQL Server does not have a dedicated JSON data type (it uses NVARCHAR), but it has a powerful suite of functions (JSON_VALUE, JSON_QUERY, JSON_MODIFY) and OPENJSON to treat text as a relational table.
+XML: It has a native XML data type with support for XQuery and XML indexing.
+
+2. File-Based Data (Blobs): FILESTREAM and FileTable
+If you have truly unstructured data like Images, PDFs, or Videos, you don't want to store them as raw bytes inside the database file (which causes massive bloat).
+FILESTREAM: This tells SQL Server to store the file on the Windows File System but maintain "transactional consistency." If you delete the row, SQL Server deletes the file.
++1
+FileTable: This is a step above FILESTREAM. It creates a special folder on your server that looks like a standard Windows folder. You can drag and drop files into it, and they automatically appear as rows in a SQL table.
+
+3. "No-Schema" Data: Sparse Columns
+If you have a table where you might have 1,000 possible attributes, but any given row only uses 5 of them, you can use Sparse Columns.
+This is efficient for "unstructured" profiles where the data is highly inconsistent across records. Sparse columns take up zero space when the value is NULL.
+
+4. Full-Text Search
+For unstructured text (like long Word documents or raw logs stored in the DB), SQL Server provides the Full-Text Search (FTS) engine. This allows you to perform "Google-like" searches (linguistic searches, fuzzy matching) rather than simple LIKE '%word%' queries.
+
+62) File table in filesteam vs full-text search
+
+FileTable in SQL Server: To store and manage files in SQL Server while allowing users/applications to access them via Windows Explorer.
+Full-Text Search in SQL Server: To search text efficiently within large text columns or document contents.
+
+Feature	                        FileTable	        Full-Text Search
+Purpose	                        Store & manage files	Search text efficiently
+Stores files?	                ✅ Yes	                ❌ No
+Searches inside file content?	❌ No (by itself)	✅ Yes
+File system access	        ✅ Yes	                ❌ No
+Works with FILESTREAM	        ✅ Required	        ✅ Optional
+Performance focus	        File management	        Search optimization
+
+63) Can we use full-text search to search inside file table
+Yes ✅ — you can use Full-Text Search to search inside a FileTable in Microsoft SQL Server.
+How It Works
+	FileTable → Stores files (PDF, Word, TXT, etc.) using FILESTREAM
+	Full-Text Search → Indexes and searches the file content
+	When Full-Text Search is enabled on a FileTable, SQL Server:
+	Reads the file binary content (varbinary(max))
+	Uses IFilters to extract text
+	Creates a full-text index
+	Allows you to search inside the document
+🔹 Architecture Flow
+	File stored in FileTable
+	⬇
+	Full-Text Engine reads FILESTREAM data
+	⬇
+	IFilter extracts text
+	⬇
+	Full-Text Index created
+	⬇
+	Search using CONTAINS / FREETEXT
+
+64) What is ghost cleanup
+1. What Is a Ghost Record
+When you run: DELETE FROM Customers WHERE CustomerID = 10;
+SQL Server:
+	Finds the row.
+	Marks the row as deleted (ghost record).
+	Leaves the row physically on the page.
+	The row still exists on the page but is invisible to queries.
+Reason:
+	Immediate page compaction is expensive.
+	Marking the row is faster.
+
+2. What Ghost Cleanup Does
+The Ghost Cleanup Task is a background system thread that:
+	Scans database pages containing ghost records.
+	Removes ghost rows physically.
+	Frees space inside the page.
+After cleanup:
+	The space becomes available for new inserts.
+
+3. How Often It Runs
+Ghost cleanup runs periodically (about every few seconds) and processes a limited number of pages each time so it does not impact system performance heavily.
+
+65) Does Update stats cause blocking?
+Yes, UPDATE STATISTICS can cause short blocking, mainly when SQL Server updates statistics metadata.
+Usually the blocking is very brief unless the table is very large or heavily used.
+Best practices to reduce blocking
+	Run stats updates during maintenance windows.
+	Enable async stats update:
+If AUTO_UPDATE_STATISTICS = ON:
+	Query may pause while statistics update runs.
+	Other queries may wait depending on locks.
+If AUTO_UPDATE_STATISTICS_ASYNC = ON:
+	Query continues with old stats.
+	Stats update runs in background, reducing blocking.
+
+66) why there pagelatch_ex wait type for insert statement to table with no identity but there is primary key?
+PAGELATCH_EX during INSERT usually means there is in-memory page contention, not disk I/O. Even if the table does not have an IDENTITY column, it can still happen when there is a PRIMARY KEY.
+1. What PAGELATCH_EX means
+	PAGELATCH_EX = SQL Server is waiting to acquire an exclusive latch on a data/index page in memory.
+	This happens when multiple sessions try to modify the same page simultaneously.
+Commonly seen with high-concurrency INSERT workloads.
+
+2. Why it happens even without IDENTITY
+	If the table has a PRIMARY KEY, SQL Server automatically creates a clustered index (unless specified otherwise).
+	If the primary key values are sequential, inserts will go to the same last page of the index.
+
+67) MSDTC configuration for Always on Group AG
+Based on my understanding, clustered MSDTC is generally not recommended for Availability Groups (AG), as it is more suitable for SQL Server Failover Cluster Instances (FCI), which depend on shared storage.
+Since AGs operate on independent nodes without shared storage, enabling DTC_SUPPORT = PER_DB becomes important. This allows each database to function as an individual resource manager.
+In contrast, within an FCI environment, the SQL Server instance itself acts as a single resource manager.
+When we enable per database DTC:
+•	Each database in the AG becomes its own resource manager
+•	SQL Server registers each DB with MSDTC using a unique ID 
+•	Even cross-database transactions inside same instance get promoted to DTC 
+o	Cross instance transactions are supported
+o	Cross database transactions within same SQL AG Instance are supported
+
+68) When lock escalation will happen?
+lock escalation happens when the engine decides it’s more efficient to replace many small locks (row/page) with a bigger lock (usually a table lock).
+
+🔑 When does lock escalation happen?
+
+There are two main triggers:
+
+1. 🔢 Lock count threshold (most common)
+When a single query acquires ≥ 5,000 locks on a table (or partition)
+SQL Server checks escalation every 1,250 locks
+If threshold is met → it tries to escalate to a table lock
+
+👉 Example:
+
+UPDATE Orders SET Status = 'Done'
+WHERE OrderDate < '2023-01-01'
+
+If this updates >5000 rows → escalation likely.
+
+2. 🧠 Memory pressure threshold
+When lock memory usage becomes high:
+~24% of buffer pool used by locks triggers escalation
+This is to reduce memory consumption
+
+3. ⚠️ Other conditions
+Happens per statement, not entire transaction
+Only for one table at a time
+If escalation fails (due to conflicting locks), SQL Server:
+Keeps row/page locks
+Retries escalation later (every 1,250 locks)
+
+69) Lazy writer vs Check point?
+eature	   Lazy Writer	        Checkpoint
+Purpose	   Free memory	        Reduce recovery time
+Trigger	   Memory pressue.      Time/log/manual
+Focus	   Buffer cache cleanup	Data durability
+Frequency. Continuous	        Periodic
+
+
+69) SQL Memory architecture?
+🧠 SQL Server Memory Architecture (Simple View)
+
+SQL Server uses memory mainly to:
+
+Cache data (so it doesn’t read from disk every time)
+Execute queries efficiently
+Manage connections and internal operations
+
+At a high level, memory is divided into:
+
+👉 1. Buffer Pool (major portion)
+👉 2. Non-Buffer Pool (other components)
+
+🔹 1. Buffer Pool (Data Cache)
+
+This is the most important part.
+
+What it stores:
+Data pages (tables, indexes)
+Index pages
+
+👉 When you query:
+
+SQL Server first checks memory (buffer pool)
+If not found → reads from disk → loads into memory
+Key concept:
+Pages = 8 KB units
+🔸 Inside Buffer Pool
+✅ Buffer Cache
+Holds actual data pages
+✅ Free list
+Available memory pages
+✅ Dirty pages
+Modified pages not yet written to disk
+🔹 2. Procedure Cache (Plan Cache)
+
+Stores:
+
+Execution plans of queries
+
+👉 Why important?
+
+Avoids recompiling queries
+Improves performance
+
+Example:
+
+SELECT * FROM Orders WHERE Id = 10
+
+→ Plan gets cached and reused
+
+🔹 3. Memory for Query Execution (Workspace Memory)
+
+Used for:
+
+Sorting
+Hash joins
+Aggregations
+
+👉 Allocated per query
+
+🔹 4. Connection Memory
+
+Used for:
+
+Each user session
+Network buffers
+🔹 5. Lock Manager Memory
+
+Stores:
+
+Locks (row, page, table)
+
+👉 Important for concurrency control
+
+🔹 6. Other Memory Areas
+🔸 CLR Memory
+For .NET code inside SQL Server
+🔸 Columnstore Object Pool
+For columnstore indexes
+🔸 In-Memory OLTP (if enabled)
+Memory-optimized tables
+
+🔥 Memory Flow (How it works)
+	Query comes in
+	SQL Server checks Buffer Pool
+	If data exists → use it
+	If not → read from disk → load into memory
+	Query executes using:
+	Buffer Pool
+	Execution Memory
+	Plan stored in Plan Cache
+
+70) what is sort spill?
+A sort spill in Microsoft SQL Server happens when SQL Server doesn’t get enough memory to complete a sort operation, so it starts using tempdb (disk) to finish the work.
+
+71) Check memory pressure?
+Types of memory pressure
+🔸 1. Internal (SQL Server)
+	Low PLE
+	High lazy writes
+	Memory grant waits
+🔸 2. External (OS level)
+	Low available memory
+	OS forcing SQL Server to release memory
+🧠 Quick checklist (real-world)
+
+If you see:
+	PLE dropping
+	Sort/hash spills
+	Queries waiting for memory
+	High lazy writes
+
+👉 You have memory pressure
+
+72) What is SARGable?
+
+In Microsoft SQL Server, SARGable (Search ARGument able) refers to a query condition that allows SQL Server to efficiently use an index to search data instead of scanning the entire table.
+The term is commonly used for WHERE clause conditions, not for tables themselves. People often say:
+	“This query is SARGable”
+	“This predicate is non-SARGable”
+
+SARGable queries help SQL Server:
+
+Use Index Seek instead of Table Scan
+Reduce IO
+Improve CPU usage
+Improve query performance significantly
+
+72.1) Index scan vs index seek?
+Index Seek:
+SQL Server navigates the index's B-tree structure and jumps directly to the matching rows. This is similar to looking up a word in a dictionary using the index.
+
+Index Scan:
+SQL Server reads through the entire index (or a large range of it) looking for matching rows. This is similar to reading every page of a book to find information.
+
+Common Reasons a Seek Becomes a Scan
+	Missing index.
+	Function on indexed column: e.g. WHERE YEAR(OrderDate) = 2025
+	Leading column of a composite index not used:
+	Data type mismatch causing implicit conversion: e.g. WHERE CustomerID = N'100'
+
+71) What is assertion failure
+An assertion failure in SQL Server is an internal consistency check failure inside the SQL Server engine. It happens when SQL Server encounters a condition that it believes should never occur during normal operation.
+
+What it means
+
+An assertion is essentially SQL Server saying:
+
+"I expected this internal condition to be true, but it wasn't."
+
+This is generally not a normal user query error like syntax or permission issues. It often points to:
+	SQL Server engine bug
+	Memory corruption
+	Corrupted data or index structures
+	Hardware / storage issues
+	Faulty drivers or filter software
+	Rare query optimizer or execution engine problems
+	Problematic T-SQL pattern triggering an engine defect
+
+1. SQL Server Engine Bug
+2. Corruption: Database or index corruption can trigger assertions.
+3. Memory / Hardware Problems
+4. Index or Metadata Inconsistency
+5. Unsupported or Edge Query Patterns
+
+
+72)  Assertion File: mxactint.h, line 2370 — Expression: m_pNotify == NULL
+Assertion File: mxactint.h means the SQL Server assertion failure occurred inside an internal SQL Server source file named mxactint.h.
+This file is generally related to transaction management / transaction state handling inside the SQL Server engine (internal transaction manager logic). When you see:
+	Assertion: File: mxactint.h
+it indicates SQL Server hit an unexpected condition while processing transactions. This is usually an engine-level issue, not a normal T-SQL error. Microsoft guidance for assertions is to check for corruption, review dumps/logs, and verify build level because assertions often indicate software defects or corruption.
+
+73) call pattern using TVPs (Table-Valued Parameter) 
+
+74) What is TVP?
+TVP (Table-Valued Parameter) in SQL Server is a feature that lets you pass multiple rows of data to a stored procedure or function as a single parameter.
+Instead of passing many individual parameters or comma-separated values, you pass a table.
+Why use TVP? TVPs are useful when you need to:
+	Pass a list of IDs
+	Insert/update multiple rows
+	Replace loops or repeated procedure calls
+	Avoid CSV/XML string parsing
+	Perform batch processing efficiently
+
+74.1) Calling SP with TVP (TVP call pattern)
+1. Create a Table Type
+Define the table structure:
+CREATE TYPE dbo.CustomerList AS TABLE
+(
+    CustomerID INT,
+    CustomerName VARCHAR(100)
+);
+
+2. Create Procedure Using TVP
+TVPs must be READONLY.
+CREATE PROCEDURE dbo.usp_InsertCustomers
+    @Customers dbo.CustomerList READONLY
+AS
+BEGIN
+    INSERT INTO dbo.Customer
+    (
+        CustomerID,
+        CustomerName
+    )
+    SELECT
+        CustomerID,
+        CustomerName
+    FROM @Customers;
+END
+
+3. Pass Data to Procedure
+Declare and populate the TVP:
+
+DECLARE @Cust dbo.CustomerList;
+
+INSERT INTO @Cust
+VALUES
+(1, 'John'),
+(2, 'Mary'),
+(3, 'David');
+
+EXEC dbo.usp_InsertCustomers
+    @Customers = @Cust;
+Without TVP vs With TVP
+
+Without TVP
+
+	EXEC proc 1
+	EXEC proc 2
+	EXEC proc 3
+
+With TVP
+
+	zEXEC proc @CustomerTable
+
+One call, multiple rows.
+
+75) Named parameter vs positional parameter
+In SQL Server, named parameters and positional parameters refer to two ways of passing values to stored procedures.
+
+1. Positional Parameters
+
+Values are passed in the exact order defined in the procedure.
+
+Procedure
+CREATE PROCEDURE dbo.usp_Test
+    @ID INT,
+    @Name VARCHAR(50),
+    @City VARCHAR(50)
+AS
+BEGIN
+    SELECT @ID, @Name, @City;
+END
+Positional call
+	EXEC dbo.usp_Test 1, 'John', 'Bangalore';
+
+
+2. Named Parameters
+Values are passed using parameter names, so order does not matter.
+
+Named call
+EXEC dbo.usp_Test
+    @Name = 'John',
+    @City = 'Bangalore',
+    @ID = 1;
+
+SQL Server maps by parameter name.
+
+Recommendation
+	For procedures with multiple or optional parameters, named parameters are generally preferred for clarity and maintainability. Positional parameters are common for short procedures with only a few inputs.
+
+
+76) Should we rebuild index? If add a column to the table 
+In SQL Server, adding a column to a table does not automatically require an index rebuild. Whether you should rebuild depends on how the new column is used.
+
+76.1) How offline and online reindex works?
+
+Online Index:
+SQL Server performs the rebuild in several phases:
+
+Preparation Phase
+	Acquires a short-term schema lock.
+	Creates a new copy of the index structure.
+	User queries and DML operations (INSERT, UPDATE, DELETE) can continue after this phase.
+Build Phase
+	SQL Server scans the existing index and builds a new index in parallel.
+	Changes made by users during the rebuild are tracked using a temporary mapping structure.
+	Both the old and new index exist simultaneously.
+Catch-up Phase
+	SQL Server applies all changes that occurred during the build phase to the new index.
+		Ensures the new index is synchronized with the table.
+Switch Phase
+	SQL Server briefly acquires a schema modification lock (SCH-M).
+	The old index is replaced with the new one.
+	The old index is dropped.
+
+Offline reindex:
+1. Acquire Lock
+
+SQL Server acquires a Schema Modification (SCH-M) lock on the table.
+	Blocks all queries accessing the table.
+	Blocks INSERT, UPDATE, DELETE, and SELECT operations.
+	Users must wait until the rebuild completes.
+2. Scan Existing Data
+	SQL Server reads the existing index or table data and sorts the keys.
+3. Build New Index Structure
+A completely new B-tree index structure is created.
+	Pages are reorganized.
+	Fragmentation is removed.
+	Fill factor is applied if specified.
+4. Replace Old Index
+Once the new index is built:
+	The old index is dropped.
+	The new index becomes active.
+5. Release Lock
+	The SCH-M lock is released and users can access the table again.
+
+76.2) During online reindex user query will use index or table scan?
+During an online index rebuild, user queries continue to use the existing (old) index, not the new index being built.
+What happens internally?
+	The old index remains fully available for query processing.
+	SQL Server builds the new index in the background.
+	User INSERT/UPDATE/DELETE operations update the old index and are tracked so the changes can be applied to the new index.
+	Queries continue to use the old index (or whatever access path the optimizer chooses).
+	At the end of the rebuild, SQL Server briefly acquires a lock and switches the new index in place of the old one.
+
+76.3) offline reindex Clustered vs Nonclustered Index
+	Offline rebuild of a Clustered Index
+		Entire table is unavailable.
+		All queries against the table are blocked.
+	Offline rebuild of a Nonclustered Index
+		Queries that need that index may be blocked.
+		Because SQL Server holds a SCH-M lock on the table during the rebuild, access to the table is generally blocked as well.
+	
+
+77) Types of Loops?
+In SQL Server, "loops" can refer to either programming loops in T-SQL or join loops in query execution plans.
+
+1. T-SQL Loops
+WHILE Loop
+	The primary looping construct in SQL Server is WHILE.
+BREAK
+	Exits the loop immediately.
+CONTINUE
+	Skips the remaining statements and starts the next iteration.
+
+2. Join Loops (Execution Plans)
+When SQL Server joins tables, it can choose one of three join algorithms:
+Nested Loops Join A⋈B
+How it works:
+	Read one row from the outer table.
+	Search matching rows in the inner table.
+	Repeat for every outer row.
+Best for:
+	Small outer table
+	Indexed inner table
+Execution plan operator:
+	Nested Loops
+
+Merge Join
+How it works:
+	Both inputs are sorted on the join key.
+	₹SQL Server walks through both datasets simultaneously.
+Best for:
+	Large sorted datasets
+	Clustered index scans
+
+Hash Join
+How it works:
+	Build a hash table from one input.
+	Probe the hash table with rows from the other input.
+Best for:
+	Large unsorted datasets
+	Data warehouse workloads
+Execution plan operator:
+	Hash Match
+
+
+Execution plan operator:
+Merge Join
+
+78) Pull and push propagation in distributed transaction?
+
+78) SQL Server crash reason due to assertion failure?
+
+Problem:
+SQL server got creased that resultended into server reboot and failover. There were close to 700 sqldump text file and few mdmp files created. 
+
+Observation: 
+
+Issue/ Scope:  SQL Server is crashing and auto-restarting approximately every 5 minutes due to a stack dump triggered by an internal assertion failure.
+Our analysis pointed the Assertion File: mxactint.h, line 2370 — Expression: m_pNotify == NULL
+
+The assertion fires in the TVP (Table-Valued Parameter) ingestion path. When SQL Server processes an RPC call containing a TVP, it opens a nested read-only transaction via CTVPBuilder::StartTransaction. During that transaction's setup, InstallNotification asserts that the notification slot (m_pNotify) is NULL — i.e., empty and available. The assert is firing because the slot is already occupied, meaning a CMsqlReadOnlyXact object is being reused or double-bound while a prior notification is still attached.
+This mostly does not indicate the data corruption issue, deadlock, or query plan problem. It is a transaction state management bug triggered specifically by TVP usage in the application layer.
+
+Immediate Actions
+1.	Limit dump generation via registry change to prevent repeated restarts while the root cause is investigated. Reference: Prevent SQL Server Dump Generation in Hot Cases. And you can remove the trace flag 2542.
+2.	Engage the application team — ask specifically:
+o	Was dbo.pInsertEmail_Without_AllHeaders recently modified?
+o	Was the calling application recently deployed or updated?
+o	Is this SP now being called with a TVP where it previously was not?
+3.	Review the SP definition to confirm TVP usage:
+ 
+EXEC sp_helptext 'dbo.pInsertEmail_Without_AllHeaders';
+ 
+Long-Term Fix There is no patch available in CU32 for this specific assertion. Resolution depends on identifying and correcting the TVP call pattern in the application. Once the application change is identified, options include:
+•	Reverting the application change if the TVP usage is unintentional
+•	Restructuring how TVPs are passed to avoid the double-bind condition
+
+
+Solution Implemented:
+	positional parameters, Json over xml, and use temp tables, 
+jdbc?
+	Instead of using TVP, team deployed json solution, calling json string, JSON via OPENJSON  
+
+
+79) When to use MSDTC?
+The Real Rule
+MSDTC is invoked when SQL Server needs to coordinate a commit/rollback across multiple independent transaction managers — not simply because a query is a write.
+
+Example that DOES need DTC:
+
+	sql
+	BEGIN DISTRIBUTED TRANSACTION
+	    INSERT INTO [ServerA].[db].[dbo].[TableA] VALUES (1)  -- resource manager 1
+      	INSERT INTO [ServerB].[db].[dbo].[TableB] VALUES (1)  -- resource manager 2
+	COMMIT
+Both servers must agree to commit → DTC coordinates the two-phase commit.
+
+Example that does NOT need DTC:
+
+	sql
+	BEGIN DISTRIBUTED TRANSACTION
+    	INSERT INTO [ServerA].[db].[dbo].[TableA] VALUES (1)  -- only one remote server
+	COMMIT
+Single resource manager → SQL Server handles it directly without MSDTC.
+
+
+80) How clustered MSTDC works without enabling firewall ports?
+Clustered MSDTC communicates over the Windows Server Failover Cluster (WSFC) internal network, which is:
+	A dedicated private network between cluster nodes
+	Already trusted and open at the OS/cluster level	
+	Not subject to Windows Firewall rules that Test-Dtc checks
+So:
+	Test-Dtc tests standalone DTC over public network → fails on firewall
+	Your transactions use clustered DTC over cluster private network → bypasses firewall entirely
+
+Important Implication
+If your SQL instances are ever moved to non-clustered servers or communicate with a server outside the cluster, DTC firewall rules will be required. The current setup works only because everything is within the same WSFC.
+
+80) Why query run sometime parallel and sometime time serial?
+1. Different Execution Plans (Parameter Sniffing)
+	The query may be compiled with different parameter values.
+2. Resource Availability
+Even if the optimizer chooses a parallel plan, SQL Server may execute it serially if:
+Worker threads are exhausted
+	CPU is under pressure
+	Server is busy
+Look for waits such as:
+	THREADPOOL
+	RESOURCE_SEMAPHORE
+
+3. Cost Threshold for Parallelism
+	If the estimated cost fluctuates around the threshold value:
+
+4. Statistics Changes
+After statistics updates, the optimizer may estimate different row counts and choose a different plan.
+	Check when stats were last updated:
+
+5) Also check whether the query contains:
+	OPTION (MAXDOP 1)
+
+80.1) How to troubleshoot performance issue due to parameter sniffing
+What is parameter sniffing
+SQL Server creates an execution plan based on the first parameter values it sees. If those values are atypical (e.g., 1 row vs. 1 million rows), the plan performs poorly for subsequent executions with different values.
+1. OPTIMIZE FOR UNKNOWN (recommended)
+	OPTION (OPTIMIZE FOR UNKNOWN);
+Ignores parameter values and uses average density statistics.
+
+2. OPTIMIZE FOR specific value
+	OPTION (OPTIMIZE FOR (@status = '2'));
+Forces plan based on a specific, representative value.
+
+3. RECOMPILE (expensive but accurate)
+	OPTION (RECOMPILE);
+Recompiles every execution. High CPU cost but optimal plan per execution.
+
+4. Local variables (breaks sniffing)
+Local variables aren't sniffed, so optimizer uses average statistics.
+
+6. Query hint with multiple parameters
+	OPTION (OPTIMIZE FOR (@started UNKNOWN, @ended UNKNOWN, @status UNKNOWN));
+
+Best practice
+Start with OPTION (OPTIMIZE FOR UNKNOWN) — it's usually the best balance between performance and stability. Only use RECOMPILE if the data distribution is extremely skewed.
+
+80.2) what is optimize for ad hoc workloads 
+When Optimize for Ad Hoc Workloads = ON:
+First execution
+	SQL Server stores only a small compiled plan stub instead of the full execution plan.
+Second execution of the same query
+	SQL Server replaces the stub with the full execution plan.
+This saves memory when many queries are executed only once.
+
+
+81) Does index / table scan impact memory?
+
+82) Is it a good idea to create index adding all columns in include option
+
+83) programming loops in T-SQL or join loops in query execution plans.
+
+84) What caching system used sql server?
+
+85) Why index updates taking time in query plan (might be for insert query)
+
+86) How to call API from SQL Server?
+
+1. SQL CLR (Recommended for production)
+	SQL CLR allows you to write a .NET assembly (C#) that uses HttpClient to call REST APIs.
+2. OLE Automation Procedures (sp_OACreate)
+	SQL Server can create COM objects such as MSXML2.ServerXMLHTTP.
+3. PowerShell + SQL Agent (Recommended for scheduled jobs)
+	PowerShell calls the API and writes the results back to SQL Server.
+4. External Application (Best architecture)
+	A service written in C#, Python, or Node.js:
+
+87) How to set concurrent user?
+
+88) How schema versioning works
+
+89) when we delete data does it delete the page stored data
+	No. When you delete rows in SQL Server, it usually does not delete the data page. Instead, it marks the row as deleted and makes the space available for reuse.
+A page is deallocated only when it becomes completely empty. If the page is now empty, SQL Server can deallocate it and return it to the allocation maps (such as GAM/SGAM) for future use. Whether and when this happens depends on factors such as the table type (heap vs. clustered index) and the operation performed.
+
+90) How OPTIMIZE_FOR_SEQUENTIAL_KEY insert works?
+Instead of letting every thread rush the latch simultaneously, SQL Server uses an internal scheduling mechanism that smooths contention and reduces inefficient latch competition.
+
+Think of it like this:
+
+Without optimization:
+
+100 people
+      ↓
+One narrow door
+
+Everyone pushes at once.
+
+With optimization:
+
+100 people
+      ↓
+Organized queue
+      ↓
+Door
+
+The door isn't bigger, but people pass through more efficiently.
+
+91) i have index with size of 1gb and 100gb, which will take longer time... 		
+
+
+For the DROP INDEX command itself — neither. They'll both finish in seconds.
+
+Both are way over the 128-extent (8 MB) threshold, so both use deferred drop:
+
+1 GB index → Sch-M lock, metadata marked dropped, command returns → ~seconds
+100 GB index → Sch-M lock, metadata marked dropped, command returns → ~seconds
+The drop is a metadata operation; size doesn't factor into how long you're holding locks or waiting for the command.
+
+92) does the background clean up block session
+
+No — the background cleanup is designed not to block sessions.
+
+Why it doesn't block
+No Sch-M lock — the schema lock was taken and released during phase 1 (the actual DROP command). By the time cleanup runs, the object is already logically gone.
+Small batches — it deallocates extents in chunks, taking only short-lived locks/latches on allocation structures (IAM, GAM, SGAM, PFS pages) for microseconds at a time
+Low priority — it's a system background thread that yields to user workload
+The pages aren't accessible anymore — no user query can touch the dropped object's pages, so there's nothing to conflict over
+
+93) similar way i have two table with same schema first table size is 100gb and the second one 500GB. want to delete column1 which will complete fast
+
+Both will complete in about the same time — seconds. Table size is irrelevant for DROP COLUMN.
+
+Why
+ALTER TABLE ... DROP COLUMN is metadata-only regardless of column type:
+
+It marks the column dropped in the system catalog
+The physical bytes stay in the rows (dead space, reclaimed later by rebuild — or DBCC CLEANTABLE for variable-length columns)
+No rows are touched, no pages rewritten — so whether the table is 100 GB or 500 GB, the command does the same amount of work
+100 GB table:  ALTER TABLE ... DROP COLUMN → ~1 second
+500 GB table:  ALTER TABLE ... DROP COLUMN → ~1 second
+The only thing that decides which finishes first
+Whichever table gets the Sch-M lock first. If:
+
+100 GB table has a long-running query on it → its drop waits (and blocks queries behind it)
+500 GB table is idle → its drop completes instantly
+Size doesn't matter; concurrency does. A drop on a busy 100 GB table can take an hour; a drop on an idle 500 GB table takes a second.
+
+93) Right candidate for cluster and non cluster index?
+
+For SQL Server, the right column for a clustered index is not necessarily the most frequently searched column. The clustered index affects the physical organization of the entire table, so you should consider several properties.
+
+1. Good candidates for a clustered index
+
+Ideally, the clustered key should be:
+
+Property	Why it matters
+Narrow	The clustered key is carried into nonclustered indexes, so a wide key makes every NCI larger
+Unique	Avoids SQL Server having to add a 4-byte uniqueifier
+Ever-increasing	Reduces page splits and random inserts
+NOT NULL	Reduces overhead
+Stable / rarely updated	Updating the clustered key can require changes to all NCIs
+Frequently useful for range/order access	Can make range scans and ordered queries efficient
+
+Microsoft specifically recommends narrow, unique, ever-increasing and immutable clustered keys where possible.
+
+Example
+
+Suppose you have:
+
+CREATE TABLE Orders
+(
+    OrderID      BIGINT IDENTITY(1,1),
+    CustomerID   INT,
+    OrderDate    DATETIME2,
+    Status       VARCHAR(20),
+    Amount       DECIMAL(18,2)
+);
+
+A good clustered index candidate could be:
+
+CREATE CLUSTERED INDEX CX_Orders
+ON Orders(OrderID);
+
+Why?
+
+OrderID
+  ↓
+BIGINT
+  ↓
+Unique
+  ↓
+Ever increasing
+  ↓
+Not normally updated
+
+That's a strong clustered-index candidate.
+
+2. What should be a nonclustered index?
+
+For a nonclustered index, start with the queries.
+
+Look at columns frequently used in:
+
+WHERE
+JOIN
+ORDER BY
+GROUP BY
+
+Microsoft recommends nonclustered indexes primarily on columns frequently used in predicates and joins.
+
+For example:
+
+SELECT *
+FROM Orders
+WHERE CustomerID = 100;
+
+Then:
+
+CREATE NONCLUSTERED INDEX IX_Orders_CustomerID
+ON Orders(CustomerID);
+
+Another query:
+
+SELECT *
+FROM Orders
+WHERE OrderDate >= '2026-01-01'
+  AND OrderDate < '2026-02-01';
+
+Then:
+
+CREATE NONCLUSTERED INDEX IX_Orders_OrderDate
+ON Orders(OrderDate);
+3. Don't automatically index every column
+
+This is important.
+
+Suppose you have:
+
+OrderID       → Clustered
+CustomerID    → NCI
+OrderDate     → NCI
+Status        → NCI
+Amount        → NCI
+Region        → NCI
+ProductID     → NCI
+
+That doesn't automatically mean the design is good.
+
+Every additional index has a cost. SQL Server has to maintain those indexes when rows are inserted, updated, or deleted. Too many indexes also consume storage, memory and I/O.
+
+
+
+94) Key column vs INCLUDE column
+
+This is another important distinction.
+
+Suppose the query is:
+
+SELECT OrderDate, Status, Amount
+FROM Orders
+WHERE CustomerID = 100;
+
+Don't necessarily create:
+
+CREATE INDEX IX_Orders
+ON Orders(CustomerID, OrderDate, Status, Amount);
+
+Instead, consider:
+
+CREATE INDEX IX_Orders
+ON Orders(CustomerID)
+INCLUDE
+(
+    OrderDate,
+    Status,
+    Amount
+);
+
+Here:
+
+INDEX KEY
+---------
+CustomerID
+    ↓
+Used to FIND the rows
+
+
+INCLUDE
+-------
+OrderDate
+Status
+Amount
+    ↓
+Used to RETURN the data
+
+This can make the index covering, avoiding a lookup back to the clustered index. Microsoft recommends keeping columns used for searching, joins, aggregation, or sorting as key columns and using other required output columns as included columns.
+
+
+--What is partial restore--
+
+In SQL Server, a partial database restore means restoring only selected filegroups of a database instead of restoring the entire database. It is useful for large databases where only a specific part needs to be recovered, reducing the time and resources required for recovery.
+
+The database can become available for use once the required filegroups are recovered. Data in unrestored filegroups remains inaccessible until those filegroups are restored.
+
+Step 1: Restore the primary filegroup
+
+RESTORE DATABASE MyDatabase
+FILEGROUP = 'PRIMARY'
+FROM DISK = 'D:\Backup\MyDatabase_Full.bak'
+WITH PARTIAL, NORECOVERY;
+
+----Steps to setup File group backup---
+
+1) Create file group
+2) Move data files accordingly to the respective FG
+3) Take full backup, establish a full database backup baseline.
+4) Make the historical filegroup read-only 
+	
+	ALTER DATABASE [YourDatabase]
+	MODIFY FILEGROUP [FG_History] READ_ONLY;
+
+5) Back up the read-only filegroup: (partial backup)
+	
+	BACKUP DATABASE [YourDatabase]
+	FILEGROUP = 'FG_History'
+	TO DISK = 'E:\SQLBackups\YourDatabase_FG_History.bak'
+	WITH
+	    COMPRESSION,
+	    CHECKSUM,
+	    STATS = 10;
+
+6) Back up only the read-write filegroups:
+	
+BACKUP DATABASE [YourDatabase]
+READ_WRITE_FILEGROUPS
+TO DISK = 'E:\SQLBackups\YourDatabase_ReadWrite.bak'
+WITH
+    COMPRESSION,
+    CHECKSUM,
+    STATS = 10;
+GO
+
+READ_WRITE_FILEGROUPS creates a partial backup containing the primary filegroup and all read-write filegroups. It excludes read-only filegroups unless they are explicitly included. 
+
+7) Continue transaction log backups
+
+--FG resore commands:
+
+Restore commands and backup-chain requirements. There are two different recovery scenarios.
+
+Scenario A — Restore only the damaged read-only filegroup
+If the rest of the database is healthy and you need to restore FG_History, you can generally restore its backup directly.
+
+RESTORE DATABASE [YourDatabase]
+FILEGROUP = 'FG_History'
+FROM DISK = 'E:\SQLBackups\YourDatabase_FG_History.bak'
+WITH RECOVERY, CHECKSUM;
+GO
+
+For a read-only filegroup that was backed up after becoming read-only, applying subsequent log backups to that filegroup is generally unnecessary. 
+Microsoft Learn. This is the recovery scenario in which keeping a dedicated backup of the historical filegroup is especially useful.
+
+Scenario B — Recover the entire database after a major failure
+A partial backup is not a substitute for a complete recovery plan. You need the primary filegroup, all required read-write filegroups, the read-only filegroups, and the necessary transaction log backups.
+
+A simplified restore sequence is:
+
+-- 1. Restore the partial backup of the primary
+--    and all read-write filegroups.
+RESTORE DATABASE [YourDatabase]
+FROM DISK = 'E:\SQLBackups\YourDatabase_ReadWrite.bak'
+WITH PARTIAL, NORECOVERY, CHECKSUM;
+GO
+
+-- 2. Restore each required transaction log backup
+--    in sequence, including the required tail-log backup
+--    when applicable.
+RESTORE LOG [YourDatabase]
+FROM DISK = 'E:\SQLBackups\YourDatabase_Log_01.trn'
+WITH NORECOVERY, CHECKSUM;
+GO
+
+-- Repeat for every required log backup, in order. 
+
+
+94) FG backup schedule sample
+
+Day	 	Read-write filegroups		Read-only filegroup		Transaction logs
+Sunday		Full partial backup		Existing full backup retained (take when needed otherwise monthly)	Every 15 min
+Monday		Differential partial backup	No new backup needed		Every 15 min
+Tuesday		Differential partial backup	No new backup needed		Every 15 min
+Wednesday	Differential partial backup	No new backup needed		Every 15 min
+Thursday	Differential partial backup	No new backup needed		Every 15 min
+Friday		Differential partial backup	No new backup needed		Every 15 min
+Saturday	Differential partial backup	No new backup needed		Every 15 min
+
+
+95) In SQL Server, MERGE is a T-SQL statement used to synchronize a target table with a source table by inserting new rows, updating existing rows, or deleting rows based on a matching condition. It combines the functionality of INSERT, UPDATE, and DELETE into a single statement.
+
+2. MERGE syntax in SQL Server
+MERGE INTO dbo.Employee AS Target
+USING dbo.Employee_Staging AS Source
+    ON Target.EmployeeID = Source.EmployeeID
+
+WHEN MATCHED THEN
+    UPDATE SET
+        Target.Name = Source.Name,
+        Target.Salary = Source.Salary
+
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (EmployeeID, Name, Salary)
+    VALUES (Source.EmployeeID, Source.Name, Source.Salary)
+
+WHEN NOT MATCHED BY SOURCE THEN
+    DELETE;
+
+
+Important: This example deletes employees from the target if they don't exist in the source. Remove the WHEN NOT MATCHED BY SOURCE THEN DELETE clause if you want to retain those target records.
+
+3. Understanding the three conditions
+
+Condition	                Meaning	                                        Action
+WHEN MATCHED	                Record exists in both source and target	        Update or delete
+WHEN NOT MATCHED BY TARGET	Record exists only in source	                Insert
+WHEN NOT MATCHED BY SOURCE	Record exists only in target	                Update or delete
+
+96) How to recompile a ad-hoc query?
+
+Quick decision
+One bad plan, ad-hoc query → DBCC FREEPROCCACHE (plan_handle)
+	if you can run the again, run with option(recompile)
+It's a proc → sp_recompile 'proc' (cleanest, safest)
+Persistent bad plan choice → Query Store plan forcing (better than repeated cache clears — the optimizer will pick a bad plan again if the underlying issue remains)
+
+
+96) what is Message types, contracts, queues, initiator and target, service in broker?
+
+
+Message Type: Defines what kind of message is being sent and its validation rules.
+
+A Message Type defines the type and format of a message exchanged between Service Broker services.
+
+For example, imagine an application sending an order to SQL Server.
+
+You might define message types such as:
+- OrderRequest
+- OrderConfirmation
+- OrderFailure
+
+Contract: Defines which message types can be exchanged and who is allowed to send them.
+A Contract defines which message types are permitted in a conversation and which service can send them.
+
+For example:
+- Application sends OrderRequest.
+- SQL Server sends OrderConfirmation or OrderFailure.
+
+
+Queue: Stores messages until they are processed.
+ A Queue is where Service Broker stores incoming messages until they are processed.
+
+Think of it as a message storage area.
+
+	INITIATOR is the service that starts the conversation.
+	TARGET is the service that receives the initial message.
+	The initiator can send OrderRequest.
+	The target can send OrderResponse.
+
+Service: Service Broker, a Service is an endpoint that identifies where messages should be sent and received. It connects a Queue with a Contract.
+
+Think of it this way:
+- Message Type: What kind of message?
+- Contract: What messages are allowed and who can send them?
+- Queue: Where are messages stored?
+- Service: Which endpoint receives messages using that queue and contract?

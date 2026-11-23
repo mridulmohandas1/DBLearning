@@ -1,0 +1,77 @@
+1) Cloud migration Initial questionnaire to understand requirement
+
+Is it a new or existing workflow:
+What is the approach you want to take for the project?
+What issues or challenges are you trying to solve?
+What else do you want to use the data for?
+What is your intended goal?  
+Are you reducing management overhead and improving process operations?
+
+What are the known workflow requirements:
+What are the interoperability requirements with other applications or systems? What other applications or workflows depend on or use the data?
+Can the application expand dynamically?
+Is there a predefined recommended configuration?
+What is the estimated current user count and anticipated count in the next year?
+What are the bottlenecks for the existing application?
+What are your retention and compliance requirements?
+What kind of workflow consistency do you have? Is it flat and consistent? Is it spikey with extreme high and low demands?
+
+What is the type of use case:
+Is this a high performance computing option?
+Is this replatforming from on premises to the AWS Cloud?
+Are you forming a data lake?
+Are you creating a disaster recovery environment?
+Are you optimizing your backup and archive storage? 
+Are you solving retention or compliance concerns?
+Are you improving shared data between multiple workflows?
+Are you implementing a new or migrating an existing enterprise resource planning (ERP) solution?
+Are you implementing or improving analytics?
+Is this a file transfer workflow?
+
+What are the requirements for storage location?
+Is the workflow remote? Then an edge solution for local compute and storage or to transfer data from the location can be the solution.
+Does the data need to be on premises because of latency or data residency requirements? Then AWS Outposts or an AWS Storage Gateway Family option can be appropriate.
+Can the data be in the AWS Cloud? Then any core service might be appropriate. 
+Does the data need to be on premises and in the AWS Cloud? Then an AWS Storage Gateway Family option or AWS DataSync for data synchronization can be the best choice as part of the solution.
+
+What are the requirements for storage type?
+What storage type does your application support?
+Does your workflow require multiple types of storage services?
+Do you need to create self-managed file systems?
+Can you use object storage to reduce storage costs?
+What are the reliability and durability requirements? Can you use a lower-cost storage class?
+
+What are the requirements for storage performance?
+Is the application IOPS or throughput intensive?
+What are the average, minimum, and maximum IOPS requirements?
+What are the average, minimum, and maximum throughput requirements?
+Is the application latency sensitive? If yes, what is the maximum latency tolerance?
+Is the application transactional? If yes, how many transactions per second?
+
+What are the requirements for access protocol ?
+What storage does the application designer recommended?
+What file access protocols are supported?
+Does the application support REST API calls?
+Are the clients and workflow primarily Linux-based, Windows-based, or web-based?
+Can the access method be modified or expanded?
+Is the application web-based? Are RESTful APIs most appropriate for the application?
+Is the file access protocol non-standard, not SMB or NFS?
+
+What are the requirements for data transfer?
+Do you need to physically transfer data because of size and connectivity constraints?
+Do you have a transfer workflow for SFTP, FTPS, or FTP?
+Do you need to synchronize data on a scheduled basis?
+Do you require Cross-Region Replication?
+Do you need to transfer data between different core storage services?
+Do you require parallel copies between on-premises and in-cloud storage?
+
+What are the requirements for data protection?
+What are your known data-protection requirements?
+Do you need regular backups?
+Do you have retention requirements?
+Do you have compliance requirements?
+Do you need snapshots for consistent point-in-time backups across multiple volumes or systems?
+Do you have long-term archival requirements?
+Which data is most valuable to your organization?
+
+

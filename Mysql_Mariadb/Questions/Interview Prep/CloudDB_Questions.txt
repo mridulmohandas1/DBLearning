@@ -1,0 +1,66 @@
+1) What is a cloud database?
+	A cloud database is a database service that runs on cloud computing platforms, providing scalable and flexible storage and management of data. 
+	It is hosted on cloud infrastructure and can be accessed over the internet, offering benefits such as automatic scaling, high availability, and cost efficiency.
+2) What are the main types of cloud databases?
+	The main types of cloud databases include relational databases (e.g., Amazon RDS, Azure SQL Database), NoSQL databases (e.g., Amazon DynamoDB, MongoDB Atlas), and NewSQL databases (e.g., Google Cloud Spanner, CockroachDB). 
+	Each type serves different data storage and management needs.
+3) What is database as a service (DBaaS)
+	Database as a Service (DBaaS) is a cloud computing model where a database is provided and managed by a third-party cloud service provider. 
+	DBaaS allows users to access and manage databases without the need for on-premises hardware or database administration, offering convenience and scalability.
+4) What is data replication in cloud databases?
+	Data replication involves copying and maintaining database copies across multiple servers or locations. It ensures data availability, fault tolerance, and disaster recovery by providing backup copies in case of failures or data loss.
+
+5) Data replication Azure VS AWS?
+Feature	                AWS	                   Azure
+HA replication	        Multi-AZ sync	           Zone-redundant storage
+Read scaling	        Read replicas	           Read replicas
+Geo DR	                Cross-region replication   Geo-replication
+Active-Active DB	DynamoDB Global Tables	   Cosmos DB
+Storage redundancy	Limited options	           Multiple tiers (LRS, ZRS, GRS)
+
+6) Types of DB offering in cloud?
+A. IaaS Databases (Self-Managed) ->You install and manage DB yourself on cloud VM.
+Example:
+	Install MySQL on EC2 / Azure VM
+Characteristics:
+	Full control
+	You manage backups, patching, scaling
+✔ Use case:
+	Legacy systems
+	Custom configurations
+
+B. PaaS Databases (Managed DB) --> Cloud provider manages infrastructure + DB operations.
+Features:
+	Auto backup
+	Auto scaling
+	Monitoring
+	Patching handled by cloud
+Examples:
+	Amazon RDS
+	Azure SQL Database
+This is the most common cloud DB model.
+
+C. DBaaS (Database as a Service / Serverless DB) --> Fully managed + no server management.
+Features:
+	Automatic scaling
+	Pay per usage
+	No capacity planning
+Examples:
+	DynamoDB
+	Cosmos DB
+
+7) Azure SQL database vs AWS RDS
+AWS RDS (Database as a Service - DBaaS)
+RDS is essentially "Managed EC2." AWS takes a standard database engine (SQL Server, MySQL, PostgreSQL) and wraps it in automation. You still feel like there is a "server" under the hood—you choose the instance size (vCPUs, RAM) and the storage type.
+
+Azure SQL Database (True PaaS)
+Azure SQL Database is "Database as a Resource." It is a version of the SQL Server engine that has been abstracted away from the OS entirely. You don't pick a server size; you pick a performance level (DTUs or vCores). It is designed to be "evergreen," meaning there are no versions to upgrade; Microsoft handles the engine updates automatically.
+
+Feature	Azure              SQL Database (PaaS)	                                        AWS RDS (for SQL Server)
+Abstraction	           High (No OS access, no "instance")	                        Medium (Managed instance, "Server" feel)
+Scalability	           Dynamic. Can scale up/down with near-zero downtime.	        Manual/Scheduled. Usually requires a brief outage to resize.
+Serverless Option	   Yes. Has a built-in serverless tier that pauses when unused.	No. (Aurora has serverless, but standard RDS SQL Server does not).
+Version Control	Evergreen. You are always on the latest stable engine.	                Specific Versions. You choose 2019, 2022, etc., and manage patch windows.
+Max Database Size	   Up to 128 TB (Hyperscale tier).	                        Up to 16 TB.
+High Availability	   Built-in by default (3 replicas).	                        Multi-AZ (optional, costs extra).
+

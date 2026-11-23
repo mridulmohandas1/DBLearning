@@ -1,0 +1,1366 @@
+Default port: 27017
+Conf file: mongod.conf
+
+---Version
+
+Recent versions and support status
+Version	Status
+9.0	Current major release
+8.3	Rapid release
+8.0	Supported
+7.0	Supported
+6.0	End of life
+5.0	End of life
+4.4 and earlier	End of life
+
+
+ 1) How many physical file will create mongodb database?
+WiredTiger Storage Engine (Default):
+
+Files per Collection/Index: Generally, WiredTiger creates a separate physical file on disk for each collection and each index within your databases.
+For example, if you have one database with three collections, and each collection has one index (plus the mandatory _id index), you'd have:
+3 collection data files
+3 index files (for the custom indexes)
+3 index files (for the mandatory _id indexes)
+Total files would be roughly 3×2 (data + _id index) +3 (custom indexes) =9 files, plus a few others for system files.
+System Files: You will also have a set of system and metadata files, including:
+Files for the WiredTiger internal metadata (e.g., WiredTiger.wt, WiredTiger.lock, _mdb_catalog.wt).
+Journal files (unless journaling is disabled, which is not recommended). These are pre-allocated and created periodically.
+Database Structure: While the data and indexes are in separate files, they are typically stored within a directory structure defined by the storage engine's configuration.
+
+journal/ – Contains journal files for the MongoDB instance.
+collection-*.wt – Stores collection data.
+index-*.wt – Stores index data.
+WiredTiger.wt – WiredTiger metadata.
+ 
+1.1) What is collection?
+	In MongoDB, a collection is a group of documents.
+
+1.2) What is _id column?
+	_id is a unique identifier for each document in a collection.
+	👉 _id = Primary Key of a document
+	Just like Primary Key in SQL Server
+	Ensures every document is unique
+	Every document must have _id
+	If you don’t provide it, MongoDB will auto-create it
+
+2) How journaling works 
+How Journaling Works
+Write-Ahead Log: Instead of immediately writing all changes to the main data files, MongoDB writes all modifications (write operations) to a special file on disk called the journal before they are applied to the core data files.
+Sequential Writes: Writing to the journal is typically a fast, sequential operation, which minimizes disk seek time and improves performance compared to random writes directly to the main data files.
+Commit Interval: MongoDB periodically flushes the in-memory changes to the journal file on disk. By default, this happens every 100 milliseconds (for the WiredTiger storage engine).
+WiredTiger Storage Engine: Since MongoDB 3.2, the default storage engine is WiredTiger, which uses a combination of checkpoints and the journal (write-ahead log) for crash recovery. Checkpoints provide a guaranteed consistent state, and the journal covers the time period between the last successful checkpoint and the crash.
+
+2.1) Commit vs check point?
+In MongoDB, Commit and Checkpoint are two different operations in the WiredTiger storage engine. Commit makes a transaction durable, whereas a checkpoint persists a consistent snapshot of database changes to the data files.
+
+3) what is _id in MongoDB documents?
+Id uniquely identifies each document within a collection. It acts as the default primary key and helps in indexing and quick retrieval.
+
+4) What is Sharding, and How Does It Work in MongoDB?
+Sharding is a method for distributing data across multiple servers in MongoDB. It allows for horizontal scaling by splitting large datasets into smaller, more manageable pieces called shards.
+Each shard is a separate database that holds a portion of the data.
+MongoDB automatically balances data and load across shards, ensuring efficient data distribution and high performance.
+
+5) Explain the Concept of Replica Sets in MongoDB.
+A replica set in MongoDB is a group of mongod instances that maintain the same data set.
+A replica set consists of a primary node and multiple secondary nodes.
+The primary node receives all write operations while secondary nodes replicate the primary's data and can serve read operations.
+If the primary node fails, an automatic election process selects a new primary to maintain high availability.
+
+6) How Does MongoDB Handle Data Consistency?
+MongoDB provides several mechanisms to ensure data consistency:
+Journaling: MongoDB uses write-ahead logging to maintain data integrity.
+Write Concerns: It specify the level of acknowledgment requested from MongoDB for write operations (e.g., acknowledgment from primary only, or acknowledgment from primary and secondaries).
+Replica Sets: Replication ensures data is consistent across multiple nodes, and read concerns can be configured to ensure data consistency for read operations.
+
+7) Mongodb restore vs import?
+Feature	        mongorestore	                                                                        mongoimport
+Data Format	        BSON (Binary JSON)	                                                                        JSON, CSV, or TSV (Text formats)
+Input Source	        A binary database dump created by mongodump	                                              A text file (JSON, CSV, or TSV)
+Primary Use	        Full database backup and recovery (restoring everything including indexes, and BSON-specific data types)	      Importing specific data from external applications or sources into a collection
+           
+Operation Type	Insert-only. It will not overwrite existing documents with the same _id by default.	Flexible. Supports insert, upsert (update/insert), and merge modes.
+Metadata/Indexes	Preserves and recreates indexes and BSON data types (like ObjectID, Date).	Does not preserve indexes or BSON-specific types (unless you use Extended JSON).
+Complementary Tool	mongodump	mongoexport
+
+8) How to restore a database by deleting the existing collection
+To perform a MongoDB dump and restore while deleting all existing records in the target collections, you need to use the --drop option with the mongorestore command.
+The standard procedure involves two steps:
+Dump the data using mongodump.
+Restore the data using mongorestore with the --drop flag. mongodb database by deleting the existing collections
+
+9) Read and write concern?
+Write concern determines how many replica set members must acknowledge a write before MongoDB considers it successful.
+It controls durability and acknowledgement guarantees for writes.
+
+✅ Common Write Concern Levels
+writeConcern	Meaning
+w: 0	        No acknowledgment — fastest, but no guarantee of durability.
+w: 1	        Acknowledged by primary only — default in many cases.
+j: true	 Wait for write to be written to the journal on disk.
+w: majority	Wait until majority of voting members have applied the write — much stronger durability and reduces risk of rollback.
+w: <number>	Wait for n members to acknowledge (e.g., w: 2).
+
+You can also set :
+	j: true — wait for journaling to disk,
+	wTimeout — timeout for the write concern acknowledgment.
+
+What Is Read Concern?
+Read concern determines how “fresh” or committed the data must be before returning to the client — i.e., how up-to-date the read view is relative to writes.
+
+🟢 Read Concern Levels
+Level	Meaning
+"local"	Returns the most recent data on that node, even if not yet replicated — fastest, default.
+"available"	Least strict — reads whatever is there, possibly orphaned or rolled back data.
+"majority"	Only returns data that has been replicated to a majority of the replica set — avoids reading data that could roll back.
+"linearizable"	Strongest consistency — ensures the primary is still primary and data returned won’t be rolled back.
+"snapshot"	Used with multi-document transactions to see a transactionally consistent snapshot across shards/replicas.
+
+📌 Default:
+Reads against the primary or secondaries use "local" unless overridden.
+
+10) Sharding best practices?
+1. Choose the Right Shard Key
+The shard key is the most important design decision for sharding. A good shard key determines how evenly data and load are distributed.
+Good shard key characteristics:
+	High cardinality — many unique values helps spread data evenly.
+	Uniform distribution — avoids hotspots where one shard does all the work.
+	Even insert spread — avoids monotonically increasing values (like timestamps) which funnel writes to a single shard.
+	Query targeting — queries should include the shard key to hit only relevant shards.
+📌 Tip: Consider compound shard keys (multiple fields) if no single field meets all criteria.
+2. Avoid Scatter-Gather Queries
+Queries that don’t include the shard key must be broadcast to all shards (called scatter-gather) and degrade performance as the cluster grows.
+Best practices:
+	Always include shard key or an indexed prefix in filters.
+	Use aggregation pipelines cautiously — large aggregations may still involve many shards.
+3. Pre-Split and Balance Chunks
+MongoDB divides data into chunks that are automatically balanced across shards. But for bulk loads or initial imports:
+	Pre-split data so your shards start with nicely distributed chunks.
+	Monitor the balancer and chunk migrations as your cluster grows.
+This helps avoid performance dips caused by heavy balancing during peak write periods.
+4. Use Appropriate Sharding Strategy
+MongoDB supports three sharding strategies:
+🌀 Hashed Sharding
+	Good for uniform distribution and write scaling.
+	Not ideal for range queries.
+📈 Range Sharding
+	Best when your queries are naturally range-based (e.g., date ranges).
+	Requires careful key choice to prevent hotspots.
+🌍 Zoned Sharding
+Useful for geographically partitioned data — associate chunks with specific regions.
+
+10.1) How to monitor sharding health?
+Run this in mongosh connected to a mongos router to get a summary of your sharded cluster:
+Lists all shards
+Shows which databases/collections are sharded.Displays chunk distribution and migrations
+This gives a quick high-level snapshot of your sharding layout. 
+	sh.status()
+
+Replica Set & Shard Node Health
+Check the health of each shard’s replica set:
+	rs.status() – shows primary/secondary states and replication lag
+	db.serverStatus() – shows operation counts, memory usage, network I/O
+These help ensure individual nodes are functioning well.
+
+Monitor balancer and locks to ensure chunk balancing is progressing:
+	use config
+	db.locks.find({ _id: "balancer" })
+
+11) How to pre-split data for sharding
+
+12) Aggregation pipeline
+An Aggregation Pipeline in MongoDB is a framework used to process and transform data through multiple stages, similar to a data processing pipeline.
+You can think of it like SQL queries with GROUP BY, filtering, sorting, joins, and calculations, but done in step-by-step stages.
+Compared to simple find() queries, aggregation can:
+
+	Filter data
+	Group and summarize
+	Perform calculations
+	Join collections
+	Transform document structure
+	Handle arrays
+	Build analytics/reporting queries
+
+It is commonly used for reporting, dashboards, ETL-like transformations, and analytics in MongoDB.
+
+13) Incremental backup?
+Method 1 — Using mongodump (Most Common)
+Step 1️⃣ Enable Replica Set (Required)
+Incremental backup requires Oplog → only available in replica sets.
+Check:
+	rs.status()
+If standalone → convert to replica set first.
+
+Step 2️⃣ Take Full Backup with Oplog
+Run:
+	mongodump --oplog --out /backup/full_backup
+This: Dumps data
+Captures Oplog at same time.This is your baseline full backup.
+
+Step 3️⃣ Take Incremental Backup (Oplog Only)
+Later, backup only new Oplog entries:
+	mongodump --db local --collection oplog.rs --out /backup/incremental
+This saves only changes.
+
+🔄 Restore Process
+Step 1:
+Restore full backup:
+	mongorestore --oplogReplay /backup/full_backup
+
+Step 2:
+Apply incremental oplog:
+	mongorestore --oplogReplay /backup/incremental
+🛠️ Method 2 — Using MongoDB Continuous Backup (Enterprise)
+
+If using tools from MongoDB Inc.: MongoDB Ops Manager / Cloud Manager provide:
+	Automatic incremental backups
+	Continuous point-in-time recovery
+	Snapshot + oplog streaming
+	No manual scripts needed.
+🛠️ Method 3 — Using Filesystem Snapshots + Oplog
+	Used in large production:
+	Take disk snapshot (EBS/LVM)
+	Archive Oplog continuously
+This is fastest enterprise method.
+
+13.1) Types of backup?
+
+(PITR).
+1. Types of MongoDB backups
+Backup type	Description	Typical tool
+Logical backup	Exports databases and collections logically	mongodump
+Logical restore	Restores logical backup data	mongorestore
+Filesystem backup	Copies MongoDB data files	OS-level tools
+Storage snapshot	Captures storage volumes at a point in time	LVM, EBS, Azure Disk
+Cloud-managed backup	Automated backup managed by MongoDB Atlas	Atlas Backup
+Continuous backup	Supports recovery to a specific point in time	Atlas PITR / Ops Manager
+Oplog backup	Captures operations for incremental recovery	Oplog replay
+
+2. Logical backup – mongodump
+mongodump is MongoDB's native logical backup utility.
+
+Example:
+mongodump \
+  --host localhost:27017 \
+  --username backupuser \
+  --authenticationDatabase admin \
+  --out /backup/mongodb/
+
+
+Restore:
+mongorestore \
+  --host localhost:27017 \
+  /backup/mongodb/
+
+
+Characteristics:
+- Backs up database and collection contents.
+- Does not copy the original WiredTiger data files.
+- Useful for database-level and collection-level backups.
+- Can be used for migration between MongoDB environments.
+- Generally slower for very large databases than physical snapshots.
+
+3. Physical backup
+Physical backup copies the actual MongoDB storage files, including WiredTiger data files and associated metadata.
+
+Example:
+mongod --shutdown
+cp -a /data/mongodb /backup/mongodb/
+
+
+Restore:
+1. Stop MongoDB.
+2. Restore the copied data directory.
+3. Verify file ownership and permissions.
+4. Start MongoDB.
+5. Validate database and collection availability.
+Characteristics:
+- Copies actual database files.
+- Generally suitable for large databases.
+- Faster than logical backup in many large-database scenarios.
+- Must ensure consistency between data files and journal files.
+- Do not simply copy a running MongoDB data directory using ordinary file-copy commands and assume it is consistent.
+
+4. Filesystem / Storage snapshot backup
+A storage snapshot captures the underlying disk or volume at a particular point in time.
+
+Examples:
+- Linux LVM snapshots
+- AWS EBS snapshots
+- Azure Managed Disk snapshots
+- SAN storage snapshots
+Architecture:
+
+Important: For a consistent snapshot, use an appropriate MongoDB-supported backup procedure. For replica sets, this can include filesystem snapshot coordination using a secondary or appropriate locking/quiescing procedure.
+
+5. Oplog-based backup
+MongoDB maintains an operation log called the oplog in the local database on replica set members.
+
+The oplog records operations that modify data.
+
+It can be used to recover a database to a specific point in time when combined with a suitable consistent base backup.
+
+Example:
+mongodump --oplog \
+  --out /backup/mongodb/
+
+
+Restore:
+mongorestore \
+  --oplogReplay \
+  /backup/mongodb/
+
+
+Important points:
+- --oplog captures oplog entries during a replica-set dump.
+- --oplogReplay replays those operations during restoration.
+- Oplog retention determines how far back you can recover.
+- This method is useful for achieving a more consistent backup and recovery point.
+
+6. Incremental backup
+Incremental backup captures changes since a previous backup rather than backing up the entire database every time.
+
+For example:
+Backup	Content
+Sunday	Full backup
+Monday	Changes since Sunday
+Tuesday	Changes since Monday
+Wednesday	Changes since Tuesday
+
+MongoDB Enterprise backup solutions such as Ops Manager support incremental backup mechanisms.
+
+MongoDB Atlas also provides managed backup capabilities, including point-in-time recovery depending on the cluster tier and configuration.
+7. MongoDB Atlas backup
+For MongoDB Atlas (managed MongoDB service), backup capabilities include:
+- Automated snapshots.
+- On-demand backups.
+- Continuous backup.
+- Point-in-time recovery (PITR).
+- Backup retention policies.
+- Restore to a new cluster.
+
+14) Types of encryption?
+1) Encryption in Transit (Network Level)
+MongoDB supports TLS/SSL encryption to secure communication between:
+Application ↔ MongoDB
+MongoDB ↔ MongoDB (replica set / sharding)
+This prevents:
+	Man-in-the-middle attacks
+	Packet sniffing
+	Credential interception
+✅ Enabled using TLS certificates in mongod.conf.
+
+2) Encryption at Rest (Storage Level)
+This protects database files stored on disk.
+Available in:
+	MongoDB Inc. Enterprise
+	MongoDB Atlas
+How it works:
+Uses WiredTiger storage engine encryption
+Encrypts:
+	Data files
+	Journal files
+	Snapshots
+	Uses AES-256 encryption
+Supports external Key Management Systems (KMS) like AWS KMS, Azure Key Vault, etc.
+🔹 In Atlas, encryption at rest is enabled by default.
+
+3) Client-Side Field Level Encryption (CSFLE)
+This is more advanced and highly secure.
+How it works:
+	Sensitive fields are encrypted before reaching the database
+	MongoDB server never sees plaintext data
+	Decryption happens only in the client application
+Example use cases:
+	Aadhaar number
+	Credit card numbers
+	Salary
+	Medical records
+Benefits:
+	Protects against:
+	DB admins
+	Snapshot theft
+	Server compromise
+⚠️ Limitation:
+Encrypted fields have restricted query support (depends on encryption type).
+
+4) Queryable Encryption (Newer Feature)
+Introduced in recent MongoDB versions.
+Allows:
+	Encrypting fields
+	Still performing equality searches on encrypted data
+Example:
+db.users.find({ ssn: "encrypted_value" })
+This improves over older CSFLE limitations.
+
+5) File System Level Encryption (Alternative)
+If using MongoDB Community Edition:
+Use OS-level disk encryption like:
+	BitLocker (Windows)
+	LUKS (Linux)
+This is not MongoDB-managed but protects disk data.
+
+Type	              Protects Against	         Who Can See Plain Data
+TLS	              Network sniffing	         DB server
+At Rest	              Disk theft	         DB server
+CSFLE	              DB admin access	         Application only
+Queryable Encryption  Same as CSFLE + search	 Application only
+
+15) Mongodb document is saved as json or bson?
+In MongoDB, a document is stored as BSON, not JSON.
+	👉 Stored internally: BSON (Binary JSON)
+	👉 Displayed/used by developers: JSON-like format
+| Aspect              | JSON   | BSON   |
+| ------------------- | ------ | ------ |
+| What you write      | ✅ Yes  | ❌ No   |
+| What MongoDB stores | ❌ No   | ✅ Yes  |
+| Format              | Text   | Binary |
+| Performance         | Slower | Faster |
+
+16) What is pagination?
+	Pagination means splitting a large set of data into smaller chunks (pages) so you don’t load everything at once.
+Methods:
+	Offset-based: db.users.find().skip(0).limit(10)   // Page 1
+		       db.users.find().skip(10).limit(10)  // Page 2
+
+	cursor-based (better): db.users.find().limit(10)  // first page
+				   db.users.find({ _id: { $gt: last_id } }).limit(10)
+
+
+16) Nested objects vs embedded objects
+
+| Aspect       | Nested Object                    | Embedded Object                       |
+| ------------ | -------------------------------- | ------------------------------------- |
+| Meaning      | Any object inside another object | Related document stored within parent |
+| Focus        | Structure                        | Data modeling/design                  |
+| Relationship | May just organize fields         | Represents parent-child relationship  |
+| MongoDB term | Generic                          | Official modeling pattern             |
+
+17) What is workload isolation in Atlas
+	Workload Isolation in MongoDB Atlas is a feature that lets you separate different types of database workloads onto different replica set nodes. This prevents one workload (such as analytics or reporting) from affecting another (such as transactional application traffic).
+For example, if your application handles customer transactions while business analysts run large aggregation queries, those long-running queries can consume CPU, memory, and disk I/O. With workload isolation, you can direct the analytical queries to dedicated nodes, allowing the primary and other nodes serving your application to remain responsive.
+
+
+18) Operator and examples 
+MongoDB operators are special keywords (prefixed with $) that perform operations in queries, updates, aggregations, and expressions. They allow you to filter documents, modify data, perform calculations, and manipulate arrays.
+
+The major categories are:
+1. Comparison Operators
+	Used to compare field values. Eg, equal, not equal, greater than, less than
+2. Logical Operators
+	Combine multiple conditions. E.g and, nor, not
+3. Element Operators
+	Check for the existence or type of fields. Eg, exists, type
+4. Evaluation Operators
+	Perform pattern matching and expression evaluation.
+$regex	Pattern matching
+$expr	Compare fields using expressions
+$mod	Modulus operation
+$text	Full-text search
+$where	JavaScript expression (generally avoided due to performance and security considerations)
+	
+
+19) what is explicit and implicit $and
+1. Implicit AND (Most Common Interview Question)
+	When you specify multiple field conditions in a query document, MongoDB implicitly combines them with AND.
+Example
+db.users.find({
+    age: { $gt: 25 },
+    city: "Bangalore"
+})
+
+2. Explicit AND
+	You explicitly use the $and operator when you want to combine conditions in an array.
+Example
+db.users.find({
+    $and: [
+        { age: { $gt: 25 } },
+        { city: "Bangalore" }
+    ]
+})
+
+When is Explicit $and Required?
+Use $and when:
+	You have multiple conditions on the same field that can't be expressed in a single operator object.
+	You are dynamically building queries in your application.
+	Your query structure requires combining separate condition objects.
+This returns the same result as the implicit example.
+
+20) What is projection
+Projection in MongoDB is the process of selecting which fields to return in the query result. Instead of returning the entire document, you can include only the fields you need or exclude specific fields. Which something like selecting specific query
+
+21) Sequence of stages
+If you're referring to MongoDB aggregation, the sequence of stages means the order in which aggregation pipeline stages are executed. The output of one stage becomes the input to the next.
+For example:
+db.orders.aggregate([
+    { $match: { status: "Shipped" } },
+    { $project: { customer: 1, amount: 1 } },
+    { $sort: { amount: -1 } },
+    { $limit: 10 }
+])
+The stages execute in this order:
+	$match – Filter documents.
+	$project – Select or reshape fields.
+	$sort – Sort the remaining documents.
+	$limit – Return only the first 10 documents.
+
+22) What is aggregation pipeline
+	The Aggregation Pipeline in MongoDB is a framework for processing and transforming documents through a sequence of stages. Each stage takes the output of the previous stage, performs an operation, and passes the results to the next stage—similar to a pipeline in Unix or a series of transformations in SQL.
+
+You can think of it as:
+
+Collection
+    │
+    ▼
+$match
+    │
+    ▼
+$project
+    │
+    ▼
+$group
+    │
+    ▼
+$sort
+    │
+    ▼
+Result
+
+22.1) Should we create .js file for aggregation pipeline?
+It depends on how you're running the aggregation. You do not have to create a .js file just to write an aggregation pipeline.
+	Option 1: Run directly in MongoDB Shell (most common)
+	Option 2: Save in a .js file (useful for reusable scripts)
+		If you run the same pipeline repeatedly, you can save it in a file such as aggregateOrders.js:
+
+23) Aggregation framework
+	The Aggregation Framework is MongoDB's framework for data transformation, reporting, and analytics. It consists of the aggregation pipeline, which processes documents through stages such as $match, $group, and $sort, along with aggregation operators and expressions used to compute values. The aggregation pipeline is the most commonly used component of the aggregation framework.
+
+24) What is queryplanner and execution stats
+1. Query Planner
+The Query Planner decides the most efficient way to execute a query.
+View the query planner
+	db.employees.find({
+    department: "IT"
+	}).explain("queryPlanner")
+
+| Field           | Meaning                                               |
+| --------------- | ----------------------------------------------------- |
+| `winningPlan`   | The plan MongoDB selected                             |
+| `rejectedPlans` | Alternative plans that were considered but not chosen |
+| `stage`         | The operation used (e.g., `IXSCAN`, `COLLSCAN`)       |
+| `indexName`     | The index being used                                  |
+
+
+2. Execution Stats
+The Execution Stats show what actually happened when the query ran. Instead of just showing the chosen plan, they provide runtime metrics such as:
+
+db.employees.find({
+    department: "IT"
+}).explain("executionStats")
+
+| Field                 | Meaning                                      |
+| --------------------- | -------------------------------------------- |
+| `executionSuccess`    | Whether the query completed successfully     |
+| `executionTimeMillis` | Query execution time                         |
+| `nReturned`           | Number of documents returned                 |
+| `totalKeysExamined`   | Number of index entries scanned              |
+| `totalDocsExamined`   | Number of documents read from the collection |
+
+
+25) What is explain plan
+	An Explain Plan is a report that shows how a database intends to execute a query. It helps you understand whether the query is using indexes efficiently, performing a full scan, sorting in memory, and other execution details.
+Explain modes
+	explain("queryPlanner")
+	explain("executionStats")
+	explain("allPlansExecution")
+
+Although the term "Explain Plan" is commonly used in SQL databases, MongoDB provides similar functionality through the explain() method.
+
+26) Does index / table scan impact memory?
+
+27) What are the trade-offs index creation
+
+28) How to identify and analyse the query whether index is needed? 
+
+30) How order determines the index efficiency 
+
+31) What is Equality sort range (ESR)? 
+
+32) What is index prefix and prefix compression
+
+33) What is partial index
+
+34) What us query planner, executionstats, allplansexecution
+
+35) What is cover query?
+
+36) What is database profile? 
+MongoDB Profiler is a built-in feature that records information about database operations (queries, inserts, updates, deletes, commands) executed against a database. It helps you identify:
+
+	Slow queries
+	Collection scans (COLLSCAN)
+	Long-running operations
+	Frequently executed queries
+	Query execution time
+	Locking and resource usage
+	Index usage
+MongoDB supports three profiling levels.
+| Level | Description                                           |
+| ----- | ----------------------------------------------------- |
+| **0** | Profiling disabled (default)                          |
+| **1** | Log only operations slower than a specified threshold |
+| **2** | Log every operation (use only for troubleshooting)    
+
+Check the current profiling level:
+	db.getProfilingStatus()
+Example output:
+
+{
+    was: 1,
+    slowms: 100,
+    sampleRate: 1
+}
+was: current profiling level
+slowms: slow query threshold in milliseconds
+sampleRate: fraction of slow operations to capture (1 = all)
+
+Enable Profiling
+Level 1 (Recommended)
+Log only slow operations.
+
+	db.setProfilingLevel(1, {
+    slowms: 100
+})
+Only operations taking more than 100 ms are recorded.
+
+Level 2
+Capture every operation.
+	db.setProfilingLevel(2)
+This is useful only for short-term diagnostics because it can generate significant overhead.
+
+Disable Profiling
+db.setProfilingLevel(0)
+
+| Field          | Meaning                         |
+| -------------- | ------------------------------- |
+| `op`           | Operation type                  |
+| `ns`           | Namespace (database.collection) |
+| `millis`       | Execution time                  |
+| `planSummary`  | Query plan used                 |
+| `docsExamined` | Documents scanned               |
+| `keysExamined` | Index keys examined             |
+| `nreturned`    | Documents returned              |
+| `ts`           | Timestamp                       |
+
+
+The profiler stores its data in the system.profile collection within each database.
+
+Queries taking more than 500 ms:
+
+db.system.profile.find({
+    millis: { $gt: 500 }
+})
+
+Sort by execution time:
+
+db.system.profile.find()
+    .sort({ millis: -1 })
+    .limit(20)
+
+Detect Collection Scans
+
+One common use of the profiler is finding queries that are not using indexes.
+
+db.system.profile.find({
+    planSummary: "COLLSCAN"
+})
+
+Find Frequently Executed Queries
+db.system.profile.aggregate([
+    {
+        $group: {
+            _id: "$command.filter",
+            count: { $sum: 1 }
+        }
+    },
+    {
+        $sort: { count: -1 }
+    }
+])
+
+If you repeatedly see COLLSCAN, review whether appropriate indexes should be added.
+
+37) What is query plannern
+
+38) Bulk write commands
+
+39) What is hints
+
+40) why do we need to enable query sampling
+
+41) Analuzeshardkey command?
+
+42) mongostats vs monogtop
+
+| Feature                 | `mongostat`                                     | `mongotop`                                         |
+| ----------------------- | ----------------------------------------------- | -------------------------------------------------- |
+| Purpose                 | Monitor overall server performance              | Monitor time spent reading and writing collections |
+| Focus                   | Server-level metrics                            | Collection-level activity                          |
+| Similar SQL Server tool | Performance Monitor (PerfMon), Activity Monitor | DMV analysis by table/index I/O                    |
+| Refresh                 | Every second (default)                          | Every second (default)                             |
+
+
+| SQL Server                                         | MongoDB                                           |
+| -------------------------------------------------- | ------------------------------------------------- |
+| Activity Monitor                                   | `mongostat`                                       |
+| `sp_who2` / `sp_whoisactive` (high-level activity) | `mongostat`                                       |
+| `sys.dm_db_index_usage_stats`                      | `mongotop` (collection activity, not index usage) |
+| Table I/O statistics                               | `mongotop`                                        |
+
+
+42.1) Btop command
+
+
+43) db.serverStatus and db.status
+
+44) What is hiding index
+
+45) Analysisg cluster health
+
+	db.serverStatus().opcounters
+	replication lag / oplog window / headroom
+	rs.printreplicationInfo()
+	rs.printsecondaryreplicationInfo()
+Use ops manager
+
+46) What is oplog and role of oplog in DB recovery
+
+47) Benefits of increasing oplog size
+
+48) How to access cluster work load balance? 
+
+	Shared data size / document count
+	Query metrics
+	Oplog GB/hour
+	Disk Write IOPS
+	Noamrmalized system cpu
+
+49) What are commands top, free and df?
+
+50) When do we consider resharding key
+
+51) Backup types
+
+	Continue backup / Continue cloud backup  
+	File system backup
+	Monogo dump
+
+52) Best practice of backup szie?
+	Keep replace size below 2TB
+	Larger data set = longer backup and restore
+	If replica set is > 2TB shard the database
+	High network bandwidth
+	High Storage write speed   nnnnu    
+
+53) MongoDB atlas upgrade?
+
+Steps to upgrade the MongoDB version in Atlas
+Log in to MongoDB Atlas.
+Select your Organization and Project.
+Go to Database Deployments (or Clusters, depending on the Atlas UI version).
+Find the cluster you want to upgrade and click Edit Configuration (or Edit Config).
+Expand Additional Settings.
+Under MongoDB Version, select the desired major version (for example, 7.0 or 8.0).
+Review the changes.
+Click Confirm & Deploy.
+
+Atlas performs a rolling upgrade, upgrading one node at a time while keeping the cluster available.
+
+54) Mongodb upgrade steps?
+
+Tarball upgrade:
+	Step 1: Verify Current Version
+	Step 2: Back Up the Database
+	Step 3: Download the New Binary Tarball
+	Step 4: Extract the Tarball
+	Step 5: Stop MongoDB
+	Step 6: Replace the Binaries
+
+		Option 1 (recommended): Keep versioned directories and update a symbolic link.
+
+/opt/mongodb/
+    mongodb-linux-x86_64-7.0.12/
+    mongodb-linux-x86_64-8.0.1/
+
+    current -> mongodb-linux-x86_64-8.0.1
+
+Update the symlink:
+
+	ln -sfn /opt/mongodb/mongodb-linux-x86_64-8.0.1 /opt/mongodb/current
+
+If your service starts MongoDB from /opt/mongodb/current/bin/mongod, no further configuration changes are needed.
+
+		Option 2: Replace the binaries directly (less flexible):
+
+	cp mongodb-linux-x86_64-rhel8-8.0.1/bin/* /opt/mongodb/bin/
+
+	Step 7: Start MongoDB		
+	Step 8: Verify the Upgrade
+	Step 9: Upgrade the Feature Compatibility Version (FCV)
+
+54) What is mongodb search
+
+55) Can we create proc?
+	MongoDB does not provide stored procedures like SQL Server. Instead, business logic is typically implemented in the application layer, while complex data processing is handled using the aggregation pipeline. For event-driven processing, MongoDB offers Change Streams and Atlas Triggers, and for reusable read logic, it supports views.
+
+56) What is embedded config server
+
+57) What is project in Mongodb atlas
+
+58) How to check replication lag
+1. Check replication lag using mongosh
+Connect to the MongoDB replica set using mongosh and execute:
+rs.printSecondaryReplicationInfo()
+
+
+Example output:
+source: mongodb02:27017
+    syncedTo: Fri Nov 20 2026 10:30:00 GMT+0000
+    0 secs (0 hrs) behind the primary
+
+59) How to add additional field in shard key
+
+60) What is data resilience
+
+61) Should we restore all shared in case if we need to restore only specific shard
+
+61.1) Backup strategy for shared cluster? 
+
+| Backup activity                  | Recommended frequency | Retention  |
+| -------------------------------- | --------------------- | ---------- |
+| Full baseline snapshot           | Daily                 | 7 days     |
+| Subsequent incremental snapshots | Every 6 hours         | 7 days     |
+| Oplog archiving                  | Continuous            | 14–30 days |
+| Weekly recovery point            | Weekly                | 4 weeks    |
+| Monthly recovery point           | Monthly               | 12 months  |
+
+
+61.2) Can we apply opslog on top of incremental snapshot
+	Yes. MongoDB Ops Manager can apply archived oplog entries on top of a restored snapshot to recover the database to a specific point in time.
+
+61.3) Ops manager snapshot vs LVM snapshot?
+
+## **Ops Manager Snapshot vs LVM Snapshot**
+
+| Feature             | MongoDB Ops Manager Snapshot                           | LVM Snapshot                                              |
+| ------------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| Snapshot level      | MongoDB database data files                            | Block-device / logical-volume level                       |
+| Technology          | MongoDB backup mechanism                               | Linux Logical Volume Manager                              |
+| Initial snapshot    | Captures baseline database data                        | Creates snapshot of logical volume                        |
+| Incremental changes | Tracks changed data-file blocks                        | Tracks changed disk blocks using COW or thin provisioning |
+| Storage             | Blockstore, filesystem or S3-compatible storage        | LVM storage pool                                          |
+| Oplog integration   | Supports oplog archiving for PITR                      | No native MongoDB oplog integration                       |
+| Database awareness  | MongoDB-aware backup coordination                      | Not MongoDB-aware                                         |
+| Sharded cluster     | Coordinates snapshots across shards and config servers | No cluster-level coordination                             |
+| Recovery            | Restore snapshot and optionally replay oplog           | Restore logical-volume snapshot  
+
+
+61.4) Storage level requirement for opsmanager snapshot
+
+| **Parameter** | **Recommendation**                                                                 |
+| ------------- | ---------------------------------------------------------------------------------- |
+| Disk type     | SSD/NVMe preferred for blockstore and temporary restore storage                    |
+| Filesystem    | XFS or another supported Linux filesystem                                          |
+| RAID          | RAID 10 for local blockstore storage, where applicable                             |
+| IOPS          | Size based on backup concurrency and restore workload; benchmark before production |
+| Throughput    | Ensure sufficient throughput for snapshot ingestion and restore                    |
+| Free space    | Maintain at least 20–30% operational headroom                                      |
+| Mount points  | Use separate mount points for snapshot, oplog and temporary storage                |
+| Redundancy    | Use redundant storage infrastructure and avoid single points of failure            |                         |
+
+61) Pre-requisites to create shard cluster using Opsmanager
+
+62) How to call API from mongodb
+Unlike SQL Server, MongoDB itself cannot directly call external REST APIs. MongoDB is a database engine and does not provide built-in commands to make HTTP/HTTPS requests.
+Instead, API calls are typically made by the application or a serverless function, which then reads from or writes to MongoDB.
+	Option 1: Application Layer (Recommended)
+		This is the most common architecture.
+			MongoDB ←→ Application (Node.js, Python, Java, C#)
+                     ↓
+                REST API
+
+63) How to set concurrent user?
+
+64) How schema versioning works
+
+65) Question before setting up monogdb
+
+1. Application Overview
+
+    What is the application used for?
+    Is it a new application or a migration?
+    What are the critical business functions?
+    Is the application customer-facing or internal?
+    What are the peak business hours?
+
+2. Data Model
+
+    What entities will be stored?
+    What is the relationship between documents?
+    What is the average document size?
+    What is the maximum document size expected?
+    Are documents likely to change frequently?
+    Are there embedded documents or references?
+
+Example:
+
+Customer
+    ├── Orders
+    ├── Addresses
+    └── Payments
+
+3. Data Volume
+    Initial database size?
+    Expected growth per month/year?
+    Number of documents?
+    Largest collections?
+    Retention period?
+    Will old data be archived?
+
+4. Workload Characteristics
+
+    Read-heavy or write-heavy?
+    Read/write ratio?
+    Peak TPS (transactions/operations per second)?
+    Concurrent users?
+    Batch processing?
+    Bulk imports?
+    Streaming data?
+
+
+Reads: 80%
+Writes: 20%
+Peak OPS: 15,000/sec
+
+5. Query Patterns (Most Important)
+
+    Which fields are searched?
+    Which fields are filtered?
+    Which fields are sorted?
+    Which fields are updated?
+    Are aggregations used?
+    Pagination?
+    Text search?
+    Geospatial queries?
+
+Example:
+
+db.orders.find({
+    customerId: 1001,
+    status: "Completed"
+}).sort({ orderDate: -1 })
+
+This helps design the right indexes.
+
+6. Index Requirements
+
+    Which queries are slow today?
+    Expected response time?
+    Existing indexes?
+    Compound indexes?
+    Unique constraints?
+    TTL indexes required?
+
+7. Availability Requirements
+
+    Required uptime?
+    Maintenance window?
+    Can the application tolerate downtime?
+    RTO (Recovery Time Objective)?
+    RPO (Recovery Point Objective)?
+
+Example:
+
+Availability: 99.99%
+RTO: 15 min
+RPO: 5 min
+
+8. Replication
+
+    Multiple data centers?
+    Read-only workloads?
+    Read preference?
+    Cross-region replication?
+    Analytics on secondary nodes?
+
+
+9. Sharding
+
+Determine if sharding is needed:
+
+    Expected database size?
+    Expected write throughput?
+    Growth over 3–5 years?
+    Any hotspot collections?
+    Candidate shard key?
+
+10. Performance Expectations
+
+    Maximum query latency?
+    Insert latency?
+    Reporting latency?
+    Batch processing window?
+    SLA?
+
+11. Security
+
+    Authentication method?
+    LDAP/Active Directory?
+    Encryption at rest?
+    TLS required?
+    Auditing required?
+    Field-level encryption?
+
+12. Backup & Recovery
+
+    Backup frequency?
+    Point-in-time recovery?
+    Backup retention?
+    Restore testing?
+    Disaster recovery site?
+
+13. Monitoring
+
+    Which metrics matter?
+    Alert thresholds?
+    Existing monitoring tools?
+    Slow query monitoring?
+    Log retention?
+
+14. Deployment Environment
+
+    Self-managed or MongoDB Atlas?
+    Cloud provider?
+    Kubernetes?
+    Virtual machines?
+    Physical servers?
+    Operating system?
+
+15. Development Practices
+
+    CI/CD pipeline?
+    Schema versioning?
+    Migration strategy?
+    Rollback plan?
+    Application release frequency?
+
+16. Integration
+
+    Other databases involved?
+    REST APIs?
+    Kafka/event streaming?
+    ETL processes?
+    Data warehouse integration?
+
+17. Compliance
+
+    GDPR/PCI/HIPAA requirements?
+    Data residency?
+    Audit requirements?
+    Data masking?
+
+66) What is always atomic
+MongoDB automatically guarantees that every operation affecting a single document is atomic, even without a transaction.
+For example:
+db.accounts.updateOne(
+    { _id: 1 },
+    {
+        $inc: { balance: -1000 },
+        $set: { lastTransfer: new Date() }
+    }
+);
+
+Both updates happen together because they modify the same document. If the update fails, none of the changes are applied.
+
+66) How mongodb decide operation should a transaction to not?
+MongoDB doesn't automatically decide whether an operation should be a transaction. The application or developer decides.
+
+	Case 1: No transaction (default)
+		If your application executes normal operations:
+
+	db.accounts.updateOne(...);
+	db.accounts.updateOne(...);
+	db.transactions.insertOne(...);
+
+MongoDB treats each operation independently.
+	First update commits immediately.
+	Second update commits immediately.
+	Insert commits immediately.
+If the server crashes after the first update, the first change remains while the others may not occur.
+
+	Case 2: Explicit transaction
+		If your application starts a transaction:
+
+const session = client.startSession();
+
+session.startTransaction();
+
+// Operations
+db.accounts.updateOne(..., { session });
+db.accounts.updateOne(..., { session });
+
+session.commitTransaction();
+
+Now MongoDB knows:
+"These operations belong to the same transaction." It waits until commitTransaction() before making the changes visible. If something fails, abortTransaction() rolls back all operations.
+
+67) Why MongoDB doesn't start transactions automatically
+	MongoDB is optimized for performance. Starting a transaction for every operation would:
+		Consume more memory.
+		Hold locks longer.
+		Increase replication overhead.
+		Reduce throughput.
+Since most MongoDB applications are designed so related data is stored in a single document, many updates are already atomic without the extra cost of a transaction.
+
+| SQL Server                                                                            | MongoDB                                                                                              |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Transactions are common because related data is spread across many normalized tables. | Transactions are explicit and typically used only for multi-document or multi-collection operations. |
+| Single `UPDATE` statements are transactional.                                         | Single-document operations are already atomic without starting a transaction.                        |
+| `BEGIN TRANSACTION` is used frequently.                                               | `startTransaction()` is used only when multiple operations must succeed or fail together.            |
+
+
+68) How to check transaction / operation per second?
+Unlike SQL Server, MongoDB does not expose a built-in "Transactions Per Second (TPS)" counter because most operations are not transactions. Instead, you can measure either:
+	Database operations per second (OPS) – reads, writes, commands.
+	Multi-document transactions per second – only if your application uses transactions.
+
+1. Check operation throughput (OPS)
+
+Run:
+
+db.serverStatus().opcounters
+
+These are cumulative counters since the server started. To estimate operations per second:
+
+Run the command.
+Wait 10 seconds.
+Run it again.
+Calculate:
+OPS = (New Counter - Old Counter) / Seconds
+
+Example:
+
+Insert:
+10:00:00 -> 100,000
+10:00:10 -> 100,500
+
+OPS = (100500 - 100000) / 10
+    = 50 inserts/sec
+
+2. Check transaction statistics
+	If your application uses multi-document transactions:
+
+db.serverStatus().transactions
+
+Important fields:
+
+currentActive – Transactions currently executing.
+currentOpen – Open transactions.
+totalStarted – Total transactions started.
+totalCommitted – Successfully committed.
+totalAborted – Rolled back.
+
+To calculate transactions per second:
+
+TPS = (New totalCommitted - Old totalCommitted) / Time
+
+Example:
+
+10:00:00
+Committed = 120000
+
+10:01:00
+Committed = 120900
+
+TPS = (120900 - 120000) / 60
+    = 15 TPS
+
+3. Use mongostat (real-time monitoring)
+
+Run:
+
+mongostat
+
+Typical output:
+
+insert query update delete command
+ 120     40      30      2      600
+
+This provides operations per second, refreshed every second by default.
+
+
+4. Check current operations
+
+To see active operations:
+
+	db.currentOp()
+
+Or filter only active ones:
+
+	db.currentOp({
+  	  active: true
+	})
+
+This is useful for identifying long-running operations but not for measuring TPS.
+
+69) Should we check fragmentation and index rebuild periodically 
+	MongoDB doesn't eliminate index fragmentation—it manages storage differently so that traditional index fragmentation maintenance (rebuild/reorganize) is generally unnecessary.
+
+The reason lies in its storage engine, WiredTiger. MongoDB also uses B-tree indexes, but WiredTiger stores data differently. Instead of managing fixed 8 KB pages like SQL Server, WiredTiger:
+	Uses variable-sized pages internally.
+	Compresses index pages.
+	Splits and merges pages automatically.
+	Reuses freed space efficiently.
+	Optimizes page layout as part of normal operation.
+
+This greatly reduces the need for manual intervention.
+
+70) How to achieve relation between documents or data?
+MongoDB does not have foreign keys like SQL Server. Instead, relationships are modeled in one of two ways:
+	Embedding (store related data inside the same document)
+	Referencing (store the _id of another document)
+Choosing the right approach is one of the most important aspects of MongoDB schema design.
+	1. Embedding (Recommended for one-to-one or one-to-few)
+		Suppose each customer has one address.
+Instead of two tables like SQL Server, you store everything in one document.
+
+{
+    "_id": 1001,
+    "name": "John Smith",
+    "email": "john@example.com",
+    "address": {
+        "street": "10 Main St",
+        "city": "New York",
+        "zip": "10001"
+    }
+}
+Advantages
+Only one read is required.
+Atomic updates (no transaction needed).
+Excellent performance.
+	2. Referencing (Similar to foreign keys)
+		Suppose a customer can place thousands of orders.
+Customers Collection
+
+{
+    "_id": ObjectId("64a1"),
+    "name": "John"
+}
+
+Orders Collection
+
+{
+    "_id": ObjectId("9001"),
+    "customerId": ObjectId("64a1"),
+    "amount": 250,
+    "status": "Completed"
+}
+
+Here,
+
+Orders.customerId
+        ↓
+Customers._id
+
+This is similar to a foreign key, but MongoDB does not enforce it.
+
+	3. Joining data
+
+MongoDB uses an aggregation stage called $lookup.
+
+db.orders.aggregate([
+{
+    $lookup:
+    {
+        from: "customers",
+        localField: "customerId",
+        foreignField: "_id",
+        as: "customer"
+    }
+}
+])
+
+Result
+
+{
+    "_id": 9001,
+    "amount": 250,
+    "customer":
+    [
+        {
+            "_id": "64a1",
+            "name": "John"
+        }
+    ]
+}
+
+ 71) Types of Index?
+
+| SQL Server         | MongoDB                                                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clustered Index    | No direct equivalent (documents are stored by `_id` order internally only in specific storage implementations; there is no user-defined clustered index) |
+| Nonclustered Index | Single Field Index                                                                                                                                       |
+| Composite Index    | Compound Index                                                                                                                                           |
+| Filtered Index     | Partial Index                                                                                                                                            |
+| Full-Text Index    | Text Index                                                                                                                                               |
+| Spatial Index      | Geospatial Index                                                                                                                                         |
+| Unique Index       | Unique Index                                                                                                                                             |
+| XML Index          | No direct equivalent                                                                                                                                     |
+| Columnstore Index  | No direct equivalent                                                                                                                                     |
+| Included Columns   | No direct equivalent (`compound` indexes may create covered queries, but there is no `INCLUDE` clause)                                                   |
+
+Which indexes are used most?
+
+For most MongoDB applications, you'll primarily work with:
+
+Single Field Index – For simple lookups.
+Compound Index – For multi-field filtering and sorting.
+Multikey Index – For array fields.
+Unique Index – To enforce uniqueness.
+TTL Index – For automatic expiration.
+Text Index – For full-text search.
+Hashed Index – Mainly in sharded clusters.
+
+The remaining index types—Partial, Sparse, Wildcard, and Geospatial—are more specialized and used when the application's data model or query patterns require them.
+
+72) Key management system and Key Management interoperability protocol 
+
+73) Percona xtrabackup support
+
+## **Compatibility comparison**
+
+| Feature                       | MongoDB Community | Percona Server for MongoDB |
+| ----------------------------- | ----------------- | -------------------------- |
+| PBM installation              | Supported         | Supported                  |
+| Logical full backup           | Supported         | Supported                  |
+| Physical full backup          | Not supported     | Supported                  |
+| Incremental physical backup   | Not supported     | Supported                  |
+| Point-in-time recovery (PITR) | Supported         | Supported                  |
+| Replica set backup            | Supported         | Supported                  |
+| Sharded cluster backup        | Supported         | Supported                  |
+
+74) What is gridfs?
+
+In MongoDB, GridFS is a mechanism used to store and retrieve large files, such as images, videos, audio files and PDF documents, that exceed the BSON document size limit.
+The maximum BSON document size in MongoDB is 16 MB.
+GridFS allows you to store files larger than 16 MB by splitting them into smaller chunks.
+
+74) Taking shard backup using opsmanager?
+
+Example starting schedule:
+Backup activity	Frequency	Retention
+Snapshot	Every 6 hours	7 days
+Oplog archiving	Continuous	30 days
+Weekly recovery point	Weekly	4 weeks
+Monthly recovery point	Monthly	12 months

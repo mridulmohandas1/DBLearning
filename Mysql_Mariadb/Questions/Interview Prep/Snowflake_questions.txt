@@ -1,0 +1,617 @@
+1) Snowflake Smarsh Setup
+
+There are 7 warehouses created. It's mostly using for reporting purposes. We are loading data from SQL server using SSIS.
+Type: Standard, size:x-small
+
+
+
+2) What is worksheet or workspace?
+
+3) What are the default Warehouses?
+	There is no default warehouse in snowflake
+
+4) How to suspend WH?
+
+5) What is catalog
+
+6) What data sharing
+
+6.1) Types of data sharing
+
+7) What is governance and security
+
+8) What is auto suspend and resume in WH
+
+9) What is streamlit
+
+10) Types of ingestion
+
+11) what is abt project and dynamic tables
+
+12) What is transformation task
+
+13) What are service and jobs
+
+14) What is compute pools
+
+15) Explain Snowflake Architecture.
+
+Snowflake’s architecture is designed to optimize both storage and compute resources while providing a seamless and highly scalable environment. It consists of three primary layers:
+
+	Database Storage Layer: This is where all the structured and semi-structured data is stored. It is highly scalable and designed for optimal storage management. Data in this layer is stored in a compressed, columnar format, which is efficient for analytical queries.
+
+	Compute Layer: The compute layer consists of virtual warehouses, which are the computational power used to process queries, load data, and perform transformations. Each virtual warehouse operates independently, which means one workload does not affect another.
+
+	Cloud Services Layer: This is the control layer of Snowflake. It manages everything related to the execution of queries, including query parsing, optimization, and metadata storage. It is also responsible for managing the security, governance, and overall user experience.
+
+16) How does Snowflake’s auto-suspend and auto-resume feature work, and why is it beneficial?
+
+Snowflake’s auto-suspend and auto-resume features help optimize compute resource usage and reduce costs. When a virtual warehouse remains idle for a defined period, auto-suspend will automatically shut down the warehouse to avoid unnecessary compute charges.
+
+Conversely, the auto-resume feature starts the warehouse automatically when a new query is received. This ensures that users only pay for compute time when the warehouse is actively processing queries.
+
+Cache: The warehouse's local cache is dropped when it suspends. The next query may therefore be slower while the cache is rebuilt.
+
+These features are particularly beneficial in environments with sporadic workloads, as they optimize cost efficiency while maintaining availability.
+
+16.1) Does auto start and resume help saving storage cost?
+		our Snowflake tables/data remain stored while the warehouse is suspended. Suspending the warehouse does not delete or reduce your stored data, so it doesn't directly reduce storage charges.
+
+17) What are micro-partitions in Snowflake, and how it help with efficiency?
+
+Micro-partitions are a fundamental aspect of Snowflake’s approach to data storage. They are compressed, managed, and columnar storage units that Snowflake uses to store data that range from 50MB to 150MB. The columnar format allows for efficient data compression and encoding schemes.
+
+Micro-partitions’ ability to compress data allows for large volumes of data to be efficiently managed as it reduces the physical storage space required, also reducing storage costs. Query performance also improves due to data pruning, which consists of relevant micro-partitions being accessed. This selective access approach is highly beneficial for data retrieval and data analytics.
+
+Micro-partitions are managed automatically by Snowflake, which eliminates the need for manual input of data partitioning or indexing, ensuring optimal data storage and also cutting the cost of administrative labor.
+
+18) How does Snowflake handle scaling and concurrency?
+
+Answer:
+Snowflake is designed to scale automatically and seamlessly without manual intervention:
+
+	Separation of Compute and Storage: Snowflake separates compute resources (virtual warehouses) from storage, allowing each to scale independently. This ensures that storage and computing can scale according to demand, reducing inefficiencies and optimizing resource use.
+	Horizontal Scaling (Multi-Cluster Warehouses): Snowflake can create multiple clusters within a virtual warehouse to handle different workloads. As query demand increases, Snowflake automatically scales up the number of clusters to distribute the load, ensuring high concurrency.
+	Elastic Scaling: Snowflake’s elastic scaling feature allows virtual warehouses to be scaled vertically (increased compute power) or horizontally (additional clusters) as needed. The system dynamically adjusts to the workload, ensuring optimal performance during high traffic periods.
+Concurrency: Snowflake uses a multi-cluster architecture to handle large numbers of concurrent queries. Each cluster operates independently, ensuring that queries from different users do not impact each other’s performance. This allows Snowflake to maintain high concurrency without performance degradation.
+
+19) What are Multi-Cluster Warehouses?
+Multi-cluster warehouses enable you to automatically scale out compute resources to manage your concurrent users/queries needs as they change, such as during peak and off hours. Multi-cluster warehouses are not beneficial for improving the performance of slow-running queries or data loading. Instead Multi-cluster Warehouse can spin-up additional warehouses to handle the workload.
+
+19.1) Types of scaling?
+
+It's both. Snowflake has two ways to scale a warehouse, and they solve different problems. Storage is separate from compute and grows automatically, so you only ever scale compute.
+
+1. Scale up: give the warehouse more resources
+
+You change the warehouse size (XS → S → M → L …). Each step doubles the compute and doubles the credits per hour.
+Use it for slow, heavy queries: big joins, large scans, spilling to disk.
+ALTER WAREHOUSE my_wh SET WAREHOUSE_SIZE = 'LARGE';
+Running queries finish on the old size. New queries use the new size.
+2. Scale out: add more clusters (multi-cluster warehouse)
+
+Snowflake adds more clusters of the same size and spreads queries across them.
+Use it for concurrency: lots of users or queries queuing at once. It doesn't make a single query faster.
+Requires Enterprise edition or higher.
+ALTER WAREHOUSE my_wh SET
+  MIN_CLUSTER_COUNT = 1
+  MAX_CLUSTER_COUNT = 4
+  SCALING_POLICY = 'STANDARD';  -- or 'ECONOMY'
+STANDARD adds clusters as soon as queries start queuing. ECONOMY waits until there's enough load to keep a new cluster busy, which saves credits.
+
+Rule of thumb: if queries are slow, scale up. If queries are waiting in the queue, scale out.
+
+
+20) Explain stages in Snowflake.
+In Snowflake, stages are temporary storage locations that hold data files before they are loaded into tables. Stages act as an intermediary between external storage systems and Snowflake’s internal database. There are two main types of stages:
+
+Internal Stages: These are managed by Snowflake and stored within Snowflake’s infrastructure. Internal stages are often used for loading data from Snowflake to external systems or vice versa.
+External Stages: These are linked to external cloud storage systems such as AWS S3, Google Cloud Storage, or Azure Blob Storage. Data can be staged in these external systems before being loaded into Snowflake for processing.
+Snowflake supports both user-specific stages (private stages) and named internal stages (for shared use across the account).
+
+21) Explain Snowpipe?
+
+Snowpipe is Snowflake’s continuous data ingestion service that enables real-time or near-real-time loading of data into Snowflake. It automatically loads data into Snowflake as soon as new files appear in a stage, whether the data is in an internal or external stage.
+Snowpipe can be set up to automatically trigger data loading via event notifications (for example, when new files are placed into AWS S3 buckets). This eliminates the need for batch loading processes, allowing businesses to ingest data as it is generated and making it immediately available for analysis.
+Snowpipe is fully managed by Snowflake, and it scales automatically to handle data load demands. It also ensures that data is loaded in an efficient manner without manual intervention.
+
+
+22) Explain what is Snowflake Time Travel and Data Retention Period.?
+
+Snowflake Time Travel: Time Travel in Snowflake allows users to query historical versions of data at any point in time, enabling users to recover data that was accidentally modified or deleted. It is a powerful feature for data auditing, debugging, and ensuring data consistency in case of errors. Time Travel works by storing historical metadata and data for a specified period. Users can access this data using the AT or BEFORE clauses in SQL queries.
+
+Data Retention Period: The Data Retention Period is the length of time that Snowflake keeps historical data for Time Travel purposes. By default, Snowflake retains this historical data for 1 day, but the retention period can be configured to up to 90 days depending on the organization’s needs. Once the retention period expires, the data is no longer accessible for Time Travel operations.
+
+23) What happen behind the scenes time travel?
+The important concept is that Snowflake doesn't simply overwrite the old table data.
+
+Snowflake stores table data in micro-partitions. When data changes, Snowflake uses copy-on-write behavior:
+
+Before UPDATE
+
+Micro-partition A
+   ├── John
+   ├── Mary
+   └── David
+
+              UPDATE
+
+After UPDATE
+
+Current data
+   └── New micro-partition
+          ├── John
+          ├── Mary-Updated
+          └── David
+
+Historical data
+   └── Old micro-partition
+          ├── John
+          ├── Mary
+          └── David
+
+The old micro-partition can remain available for Time Travel.
+
+So when you query:
+
+SELECT *
+FROM CUSTOMER AT (TIMESTAMP => ...);
+
+Snowflake reconstructs the table using the appropriate historical micro-partitions.
+
+24) Explain what is fail-safe.?
+Fail-safe is an additional data protection feature in Snowflake designed to ensure data can be recovered even after the Time Travel period has expired. After Time Travel data is no longer accessible, Snowflake retains a backup of the data for an additional 7 days in a fail-safe period. This allows Snowflake support teams to restore lost or corrupted data in case of catastrophic failures. Fail-safe is managed and accessed by Snowflake’s support team rather than the end user, and it ensures that even in extreme cases of data loss, recovery is possible.
+
+25) Explain Snowflake caching and mention its type.
+Snowflake uses several types of caching to optimize performance and reduce the time required for query execution:
+
+	Query Result Caching: Snowflake automatically caches the result of a query. If the same query is executed again with identical parameters, Snowflake will return the cached result, bypassing the need for re-computation.
+	Metadata Caching: Snowflake caches metadata such as database, schema, and table information, reducing the time needed to parse and resolve queries.
+	Query Caching: Snowflake caches intermediate results of queries during execution. If the same query is executed again, it can reuse the cached intermediate results, which reduces processing time.
+	Data Caching : Caches hot data for faster reads
+	Materialized Views : Reuse query results without re-running queries
+	Clones : Quickly create replicas of tables/databases
+These caching mechanisms ensure faster query performance by minimizing the need to reprocess the same data multiple times. Caching is automatic and managed transparently by Snowflake.
+
+26) What do you mean by zero-copy cloning in Snowflake?
+	Zero-copy cloning in Snowflake refers to the ability to create a logical copy of a database, schema, or table without duplicating the underlying data. When a clone is created, Snowflake creates a reference to the existing data rather than copying it. This makes the cloning process extremely fast and cost-efficient. Any changes made to the clone do not affect the original data, and vice versa. This feature is valuable for creating test environments, backup copies, or performing exploratory data analysis without consuming extra storage space.
+
+27) Explain in short about Snowflake Clustering.
+	Clustering in Snowflake refers to the process of organizing data in a way that improves query performance, particularly for large datasets. Snowflake uses automatic clustering by default, meaning it automatically manages data distribution and storage optimization. Users can define cluster keys to help Snowflake organize data more efficiently based on commonly queried columns. This allows for faster retrieval of data and optimized query performance, especially when working with large volumes of data.
+
+Automatic and transparent to users
+Performed during loading and maintenance operations
+Clustering keys determined automatically or specified manually
+Queries automatically leverage clustering without any changes needed
+In Snowflake, there are two types of clustering keys:
+
+	single-field — Single-field clustering keys are based on a single column,
+	compound — compound clustering keys are based on multiple columns.
+
+28) What is Snowflake’s data sharing feature, and how does it work?
+	Snowflake’s data sharing feature allows organizations to securely share data across different Snowflake accounts without the need to copy or move the data. This is done in real time, meaning that data can be shared as soon as it is available, with no delays.
+The sharing process works by creating a share in Snowflake that contains selected data (tables, views, schemas, etc.) and then granting access to another Snowflake account. This access is read-only, so the recipient can query the shared data but cannot modify it.
+	Data sharing is secure and governed by Snowflake’s role-based access control (RBAC), ensuring that only authorized users have access to the data. This feature is commonly used for sharing data between business partners or departments within a large organization, without the overhead of data duplication.
+
+29) How meterrialized view is faster than not data read?
+	Exactly — a Snowflake Materialized View is persisted storage, not an in-memory cache. The performance improvement does not primarily come from "disk being faster." It comes from doing much less work and reading much less data.
+
+Think of it this way:
+
+Without Materialized View
+
+Suppose your base table is 10 TB:
+
+10 TB SALES table
+      ↓
+Read relevant micro-partitions
+      ↓
+Filter
+      ↓
+Join
+      ↓
+GROUP BY
+      ↓
+SUM / COUNT
+      ↓
+Return result
+
+Even if Snowflake uses its caching mechanisms, the query may still need to perform significant processing.
+
+With Materialized View
+
+Suppose the MV contains only 50 GB of pre-aggregated data:
+
+10 TB SALES
+      ↓
+  Materialized
+  aggregation
+      ↓
+  50 GB MV
+      ↓
+Query
+      ↓
+Read only required MV data
+
+So the advantage is:
+
+10 TB of raw data + expensive computation
+
+versus
+
+50 GB of already-computed data
+
+That's where the speed comes from.
+
+	But Snowflake also has caching
+
+This is the part that can make it confusing.
+
+Snowflake has several layers that can help subsequent queries avoid physical storage reads, including warehouse/local SSD cache and result cache.
+
+Conceptually:
+
+                  Query
+                    |
+             Snowflake optimizer
+                    |
+        +-----------+-----------+
+        |                       |
+   Materialized View       Base table
+        |
+   Micro-partitions
+        |
+   Storage
+
+When the MV is accessed, Snowflake still has to retrieve its data, but:
+
+	The MV contains much less data.
+	The expensive computation was already performed.
+	Micro-partition pruning can reduce what needs to be read.
+	Compression reduces the physical data that needs to be scanned.
+	Snowflake caching can sometimes avoid going back to remote storage.
+
+So don't think:
+
+MV = data stored in memory → therefore fast
+
+Think:
+
+MV = expensive work already done + much smaller dataset to scan.
+
+One more important distinction
+
+There are actually three different concepts you should keep separate:
+
+| Mechanism             | Where data/result is         | Main benefit                    |
+| --------------------- | ---------------------------- | ------------------------------- |
+| **Materialized View** | Persistent Snowflake storage | Pre-computed data               |
+| **Warehouse cache**   | Compute/warehouse cache      | Avoid repeated storage reads    |
+| **Result cache**      | Cached query result          | Avoid executing the query again |
+
+
+
+30) How compression reduces physical data scanning?
+	Yes. In Snowflake, compression reduces the amount of physical data that needs to be read from storage, but there is an important distinction between logical data size and physical bytes scanned.
+
+Simple example
+
+Imagine your table logically contains:
+
+1 TB of data
+
+Snowflake compresses the data and stores it as:
+
+1 TB logical data
+       ↓ compression
+200 GB physical storage
+
+If a query needs to scan all of that data, Snowflake may only need to read roughly 200 GB of compressed data from storage, rather than 1 TB of uncompressed data.
+
+So:
+
+Uncompressed:
+Storage → 1 TB → CPU decompress → process
+
+Compressed:
+Storage → 200 GB → CPU decompress → process
+
+The important benefit is that much less data has to move from storage to the compute layer.
+
+But there's another important Snowflake optimization
+
+Snowflake doesn't simply decompress the entire 200 GB and process everything.
+
+Snowflake stores table data in micro-partitions, and metadata is maintained for those micro-partitions.
+
+For example:
+
+Table
+│
+├── Micro-partition 1 → customer_id 1–1000
+├── Micro-partition 2 → customer_id 1001–2000
+├── Micro-partition 3 → customer_id 2001–3000
+├── Micro-partition 4 → customer_id 3001–4000
+└── ...
+
+Suppose you run:
+
+SELECT *
+FROM sales
+WHERE customer_id = 1500;
+
+Snowflake can determine from micro-partition metadata that only micro-partition 2 can contain the value.
+
+So it can do:
+
+100 micro-partitions
+        ↓
+Metadata pruning
+        ↓
+1 micro-partition
+        ↓
+Read compressed data
+        ↓
+Decompress/process
+
+This is micro-partition pruning, and it can have a much larger impact than compression alone.
+
+Compression vs pruning
+
+This distinction is important:
+
+Compression:
+
+1 TB logical
+      ↓
+200 GB physical
+
+You still potentially scan the entire table, but the physical data is smaller.
+
+Pruning:
+
+1 TB logical
+      ↓
+Only relevant micro-partitions
+      ↓
+100 GB relevant data
+
+You avoid reading irrelevant micro-partitions altogether.
+
+Together:
+
+1 TB logical table
+       ↓
+Micro-partition pruning
+       ↓
+100 GB relevant logical data
+       ↓
+Compression
+       ↓
+20 GB physical data
+       ↓
+Read + decompress + process
+
+That's why Snowflake can be very efficient.
+
+
+31) What Are Snowflake Tasks
+	Snowflake tasks allow you to run a piece of code/script asynchronously on Snowflake. They are executed in a separate transaction and context from the caller. Key aspects:
+
+	Used for executing JavaScript, SQL, etc
+	Help with ETL workflows, maintenance operations
+	Can chain tasks together using dependencies
+	Status and results can be checked programmatically
+	Can configure auto-retries, notifications on failure
+	Useful for long-running operations, parallel execution
+
+32) Explain Snowflake Streams and Tasks? 
+	Snowflake Streams capture changes to tables and provide change data to consumers in near real-time. Tasks help run async pieces of code like ETL transformations.
+
+Key differences:
+
+Streams capture changes, Tasks run code
+Streams continuously, Tasks run once
+Streams read-only, Tasks can transform data
+Streams require setup for tables, Tasks can run ad hoc
+Streams data capture, Tasks general purpose execution
+They can be used together for capturing changes and processing them.
+
+
+33) How do you debug a query that used to run in seconds and now takes several minutes?
+	Review the Query History
+Use Snowsight or run:
+SELECT * 
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY 
+WHERE query_text ILIKE '%<your query>%' 
+ AND start_time > DATEADD(day, -1, CURRENT_TIMESTAMP());
+Check for:
+
+Query duration
+Warehouse size & status
+Queuing time
+Compilation vs execution time
+Check for Recent Data Volume Growth
+Has the underlying table grown significantly?
+SELECT * 
+FROM INFORMATION_SCHEMA.TABLE_STORAGE_METRICS 
+WHERE table_name = '<your_table>';
+Look at row count and storage size changes over time.
+
+Analyze the Query Profile
+Is there a long-running scan or join operation?
+Are there data skews, broadcast joins, or repartitioning steps that are expensive?
+Check Table Clustering
+If large tables are involved, check if clustering is helping:
+
+SELECT * 
+FROM INFORMATION_SCHEMA.TABLES 
+WHERE table_name = '<your_table>';
+If a lot of micro-partitions are being scanned unnecessarily, consider re-clustering (manually or with an automatic clustering policy).
+
+Investigate Warehouse Issues
+Was the virtual warehouse resized (smaller) or paused frequently?
+Could be queueing due to concurrency or warehouse overload.
+Check for Code or Logic Changes
+Look for recent changes in:
+
+Query filters or joins
+CTEs/subqueries
+UDF usage & definition
+Materialized views or temp tables?
+
+34) How Can You Monitor and Optimize Snowflake’s Performance?
+	Some ways to monitor and optimize performance are:
+
+	Reviewing query history, and profiles to identify slow queries
+	Checking warehouse utilization for optimal sizing
+	Tuning queries to leverage clustering, partitioning
+	Using appropriate caching for hot data
+	Scaling up or down warehouses for concurrency
+	Tracing long-running queries to identify bottlenecks
+	Collecting statistics on tables for query optimization
+	Checking usage patterns to optimize workloads
+
+34) How snowflake stored data in cloud provider?
+
+Yes — but there is an important distinction between where Snowflake runs and where your Snowflake table data is stored.
+
+If you create a Snowflake account on AWS, Snowflake uses AWS infrastructure for its three main layers: storage, compute, and cloud services. However, you don't create or manage the underlying S3 bucket yourself for normal Snowflake tables. Snowflake manages that storage for you.
+
+Think of it like this
+                    Your Snowflake Account
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+     Cloud Services     Compute          Storage
+          │           Virtual Warehouse       │
+          │                │                  │
+          │                │                  ▼
+          │                │          Snowflake-managed
+          │                │          cloud storage
+          │                │          on AWS
+          │                │
+          └────────────────┴──────────────────┘
+
+For example, suppose your Snowflake account is deployed in:
+
+AWS → US East (N. Virginia)
+
+and you run:
+
+CREATE TABLE customer (
+    id INT,
+    name VARCHAR
+);
+
+Snowflake takes the data and converts it into its compressed, columnar, internally optimized format, dividing it into micro-partitions. Those micro-partitions are persisted in Snowflake-managed cloud storage.
+
+You don't see an S3 bucket in your AWS account containing those table files like:
+
+my-aws-account
+   └── s3://my-bucket/
+          └── snowflake-data/
+
+Instead, Snowflake manages the underlying storage infrastructure.
+
+But you can also use your own AWS S3
+
+This is where it gets slightly confusing.
+
+You can have:
+
+                 Snowflake
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+ Snowflake-managed          Your AWS S3
+    storage                  bucket
+        │                       │
+ Normal Snowflake          External stage
+      tables                / data lake
+
+For example, you might have:
+
+AWS Account
+│
+├── S3
+│    └── company-data/
+│         ├── sales/
+│         └── customers/
+│
+└── Other AWS resources
+
+and create a Snowflake external stage pointing to that S3 bucket. In that case, the S3 storage belongs to you/your organization, and Snowflake accesses it through the configured integration.
+
+The key difference
+	Normal Snowflake table	External S3 data
+Storage	Snowflake-managed	Your AWS S3
+You create S3 bucket?	No	Yes
+Snowflake manages storage?	Yes	No
+You see bucket in AWS console?	Generally No	Yes
+Example	CREATE TABLE	External stage
+Storage billing	Snowflake	AWS S3
+
+So when you hear:
+
+"I created Snowflake on AWS."
+
+it does not mean:
+
+"I created Snowflake inside my AWS account and Snowflake created an S3 bucket in my account."
+
+Rather, Snowflake provisions and manages the required infrastructure on the selected AWS cloud platform.
+
+One useful exception is Iceberg tables: Snowflake can be configured either to use Snowflake-managed storage or your own AWS S3 storage, depending on how the Iceberg table is configured.
+
+In short: if you're using ordinary Snowflake tables, think "Snowflake-managed storage running on AWS", not "my own AWS S3 bucket."
+
+35) what is Parquet?
+	In Snowflake, Parquet is mainly used as a file format for importing and exporting data, especially when working with cloud storage such as Azure Blob Storage, Amazon S3, or Google Cloud Storage.
+
+36) What is skew? 
+	Skew in Snowflake occurs when data or processing work is unevenly distributed during query execution. It can slow down joins and aggregations because some tasks take longer than others. I would use Query Profile to inspect operator execution times, row counts, join cardinality, and spilling, then optimize the query, join strategy, or data organization as appropriate
+
+37) What is Pruning?
+What is pruning in Snowflake?
+Pruning in Snowflake is the process of skipping unnecessary data while executing a query. Instead of scanning every micro-partition in a table, Snowflake identifies and reads only the micro-partitions that might contain the required data.
+
+This reduces the amount of data scanned, which can improve query performance and reduce compute usage.
+1. How pruning works
+Snowflake automatically divides table data into small, columnar storage units called micro-partitions. Each micro-partition stores metadata, including the minimum and maximum values for columns.
+
+When you run a query, Snowflake uses this metadata to determine which micro-partitions could contain matching rows. If only 10 out of 100 micro-partitions need to be scanned, Snowflake can skip the other 90. This is called micro-partition pruning.
+Snowflake performs pruning automatically. You do not need to create traditional indexes or manually define partitions for standard Snowflake tables. 
+Snowflake Documentation+1
+
+3. How do you check pruning in Snowflake?
+Open the query in Query Profile and inspect the table scan operator. Look at the number of micro-partitions scanned versus the total number of micro-partitions.
+
+38) Create a snowflake database, does it attach with any warehouse by default?
+	No. When you create a database in Snowflake, it is not automatically attached to any virtual warehouse.
+
+Snowflake treats databases and warehouses as separate resources.
+- Database: Stores and organizes your data (schemas, tables, views, etc.).
+
+- Warehouse: Provides compute resources to execute SQL queries, load data, and perform DML operations.
+
+29) Does the warehouse directly connected to the database?
+In Snowflake, a warehouse is not directly connected or attached to a database. It is selected at the session level.
+
+30) what operation will work without selecting warehouse?
+Operation		Warehouse required?
+CREATE DATABASE		No
+CREATE SCHEMA		No
+CREATE TABLE (empty)	No
+ALTER TABLE		Generally no
+DROP TABLE		No
+SHOW TABLES		No
+DESCRIBE TABLE		No
+INSERT INTO		Yes
+SELECT from table	Yes
+UPDATE / DELETE		Yes
+CREATE TABLE AS SELECT	Yes
+
+30) 
+
+

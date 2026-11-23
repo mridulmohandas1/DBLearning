@@ -1,0 +1,322 @@
+1) Block storage vs Object storage?
+
+Object Storage (Dell ECS): Stores data as discrete objects (with metadata and unique IDs) in a flat namespace (buckets/namespaces). It's optimized for massive scalability (up to exabytes), durability via erasure coding, and workloads like backups, archives, AI/ML, and analytics. Access is via APIs, not direct block-level I/O.
+Block Storage: Provides raw, fixed-size blocks of data that act like virtual disks (e.g., for VMs or databases). It's suited for low-latency, random read/write operations, as seen in solutions like Dell PowerStore or EMC XtremIO.
+
+1.2) Block storage vs Bloc Storage
+1. Block Storage (The "Disk Drive")
+Block storage breaks data into fixed-size chunks called "blocks." Each block is given a unique identifier, and the storage system places these blocks wherever it is most efficient.
+How it works: It acts like a raw, high-performance hard drive. The Operating System manages the file system (e.g., NTFS, ext4) on top of these blocks.
+Performance: Extremely fast, low latency.
+Typical Use Cases:
+	Operating Systems: Hosting Windows/Linux instances (like AWS EBS or Azure Managed Disks).
+	Databases: SQL Server, Oracle, or MySQL data files.
+	Applications: Any app that requires random read/write access to files.
+
+2. Blob / Object Storage (The "Digital Warehouse")
+Blob (Binary Large Object) storage treats data as a single unit (an object) bundled with metadata and a unique ID. You don't "edit" a file; you replace the whole thing.
+How it works: It is accessed via API/HTTP (e.g., PUT, GET requests). It doesn't use a traditional file system.
+Performance: High throughput (good for moving large files) but higher latency than block storage.
+Typical Use Cases:
+	Static Assets: Images, videos, and CSS files for websites.
+	Backups/Archives: Massive data dumps for long-term retention.
+	Big Data: Data lakes for analytical processing.
+
+
+Feature	        Block   Storage	          Blob (Object) Storage
+Data Format	Raw Blocks (Chunks)	  Objects (Flat structure)
+Access Method	Mounted as a Disk/Volume  API / HTTP (URL based)
+Performance	Very High (Low latency)	  High Throughput (Higher latency)
+Editability	Change individual bytes	  Replace the entire object
+Scalability	Limited to volume size	  Virtually Infinite
+Cost	        More expensive per GB	  Very inexpensive
+
+
+2) Key-value vs Document DB vs Column DB
+
+Feature   	 Key-Value DB	     Document DB	       Column DB
+Data Structure	 Simple key → value  JSON documents	       Column families
+Schema	         None	             Flexible	               Semi-structured
+Query Capability Only by key	     Query fields inside       Query columns
+Complexity	 Very low	     Medium	               High
+Best For	 Caching	     Apps with evolving data   Big data analytics
+
+3) What is multi tenant arch
+In a SQL database context, Multi-tenant architecture is a design where a single instance of a software application (and its underlying database) serves multiple distinct customers, called "tenants."
+The core challenge is balancing isolation (keeping Tenant A's data invisible to Tenant B) with efficiency (sharing resources to keep costs low).
+In SQL Server or other relational databases, there are three primary ways to achieve this:
+
+A. Database-per-Tenant (Isolated)
+Each customer gets their own completely separate physical database.
+Structure: DB_TenantA, DB_TenantB, DB_TenantC.
+	Pros: Maximum security and isolation. You can restore one customer's data without affecting others. You can scale one "big" customer to a larger server easily.
+	Cons: High management overhead. If you have 1,000 tenants, you have to manage 1,000 backups, 1,000 schema updates, and 1,000 connection strings.
+
+B. Schema-per-Tenant (The Middle Ground)
+All tenants are in one database, but each has their own logical Schema.
+Structure: TenantA.Orders, TenantB.Orders.
+	Pros: Simplifies connection management (one connection string). Offers a layer of security via database permissions.
+	Cons: Harder to backup a single tenant. Schema updates still require looping through every schema.
+
+C. Shared Database, Shared Schema (The "Cloud Native" Way)
+All tenants live in the same tables. You distinguish them using a Tenant ID column.
+	Structure: A single Orders table with a column TenantID.
+	Pros: Maximum cost efficiency and easiest management. One backup, one schema update for everyone.
+Cons: "Noisy Neighbor" effect (one big tenant can slow down everyone). Risk of data leakage: A developer forgetting a WHERE TenantID = 'X' clause in the code could accidentally show one customer's data to another.
+
+4) How kafka Enqueus and Dequeus messages?
+
+Note: Benefit of KAFKA: No locking, no updates and delete (only append message queue), No deletion queue (uses retention instead, time, size and log compaction)
+
+Step 1: Producer Sends a Message
+A producer application sends a message to a topic.
+
+Producer → Topic → Partition
+Step 2: Topic is Divided into Partitions
+Each topic has one or more partitions.
+	Messages are appended sequentially
+	Each message gets an offset number
+	Messages are written to disk (append-only log)
+Step 3: Message is Appended (NOT Inserted Like SQL)
+Kafka:
+	Does NOT update rows
+	Does NOT reorder
+	Does NOT scan table
+It simply appends to the end of the partition log. This makes enqueue extremely fast (sequential disk write).
+
+2️⃣ How Kafka Dequeues Messages (Consumer Side)
+This is where Kafka is very different from SQL queues. Kafka does NOT delete messages when consumed.
+Instead:
+	Consumers read by offset
+	Kafka stores the consumer’s last read offset
+	Messages remain in the log until retention expires
+Step-by-Step Dequeue
+Step 1: Consumer Polls the Topic
+Consumer asks:
+Give me messages after offset 5
+Kafka returns:
+Offset 6 → Order X
+Offset 7 → Order Y
+
+Step 2: Consumer Processes Message
+After successful processing:
+Consumer commits the new offset (e.g., 7)
+Kafka stores this in:
+__consumer_offsets topic
+
+Important Difference from SQL Queue
+SQL Queue	  Kafka
+Row is deleted	  Message remains
+Queue shrinks	  Log grows
+Single consumer	  Many consumer groups
+Locking required  No locking
+
+5) What is compaction in kafka?
+Log compaction is a Kafka retention mechanism that keeps only the latest value for each message key, instead of deleting messages based on time or size.
+Normally, Kafka deletes messages using:
+	Time-based retention (e.g., 7 days)
+	Size-based retention (e.g., 100GB)
+But sometimes you don’t care about old history — you only care about the latest state of each key. That’s where compaction helps.
+
+6) IOPS \ Throughout
+1. Disk IO (IOPS)
+IOPS stands for Input/Output Operations Per Second. It measures how many times per second the storage can complete a read or write request.
+2. Throughput (Bandwidth)
+Throughput measures the data transfer rate, typically in MB/s (Megabytes per second) or GB/s. It is the raw speed of data movement.
+	IOPS (Disk IO): The number of individual "drops" or "buckets" of water moving per second.
+	Throughput: The total "volume" of water flowing through the pipe per second (e.g., gallons per minute).
+
+6) Vector database workflow
+
+1️⃣ Data → converted to vectors
+2️⃣ Vectors → stored in vector database
+3️⃣ User question → converted to vector
+4️⃣ Database finds most similar vectors
+5️⃣ AI uses them to answer
+
+
+6) MySQL migration using Linkedserver vs kafka as buffer layer
+
+“For small or one-time migrations, I would use a linked server between MySQL and Microsoft SQL Server because it’s simple and quick to set up. However, for production-scale migrations, I prefer using Apache Kafka with CDC tools like Debezium. Kafka enables continuous data synchronization with near-zero downtime, provides replay capability in case of failures, and decouples the source and target systems. This makes the migration more reliable, scalable, and aligned with DBRE best practices.”
+
+MySQL → Debezium (CDC) → Kafka Topics → Kafka Consumer / Sink → SQL Server
+🔍 Flow explanation
+MySQL
+	Source database
+	Changes captured from binlog
+Debezium
+	Reads changes (insert/update/delete)
+	Sends events to Kafka
+Apache Kafka
+	Stores and streams events
+	Ensures durability + ordering
+Consumer / Sink
+	Reads Kafka topics
+	Applies changes
+Microsoft SQL Server
+	Target database
+	Kept in sync until cutover
+
+🔥 One-liner to impress interviewer
+
+👉 “Kafka turns database migration from a one-time risky activity into a continuous, reliable streaming process with minimal downtime.”
+
+7) How to rollback the change in liquibase
+
+🏷️ Step 1: Tag before deployment (already done)
+liquibase tag prod_release_v2
+
+🧪 Step 3: Preview rollback (VERY important)
+liquibase rollbackSQL prod_release_v2
+
+👉 Verify:
+What will be reverted
+No unintended data loss
+
+🔄 Step 4: Execute rollback
+liquibase rollback prod_release_v2
+
+👉 This:
+Reverts all changes after the tag
+Uses rollback scripts defined in changeSets
+
+	or ✅ Rollback last change
+	liquibase rollbackCount 1
+
+👉 Reverts the most recent changeSet
+
+	✅ Rollback to a specific point in time
+	liquibase rollbackToDate "2026-05-01 10:00:00"
+
+🔍 Step 5: Validate system
+Check:
+Application working
+Queries performing normally
+Validate data consistency
+
+📊 Step 6: Audit & logging
+Check DATABASECHANGELOG
+Send logs to Plunk
+
+👉 For RCA (root cause analysis)
+
+
+8) How to rollback in git
+
+🔄 1. Undo last commit (safe – keeps history clean)
+✅ Create a reverse commit
+git revert HEAD
+
+👉 This:
+Creates a new commit that undoes the previous one
+Safe for shared branches (like main)
+
+⏪ 2. Rollback to a specific commit
+Step 1: Find commit
+git log --oneline
+Step 2: Revert that commit
+git revert <commit_id>
+
+👉 Keeps history intact (best for teams)
+
+🚨 3. Hard rollback (dangerous – rewrites history)
+git reset --hard <commit_id>
+git push --force
+
+👉 This:
+Completely removes commits after that point
+⚠️ Risky in shared repos
+
+Use only when:
+
+You are sure
+Or working in isolated branch
+🔁 4. Rollback a merged PR in GitHub UI
+
+In GitHub:
+
+Go to merged PR
+Click “Revert”
+GitHub creates a new PR to undo changes
+
+👉 Safest option for production code
+
+🧪 5. Rollback a file to previous version
+git checkout <commit_id> -- filename
+🧱 Real CI/CD scenario (your use case)
+
+If Liquibase deployment failed:
+
+Revert code in Git:
+	git revert HEAD
+	git push
+	CI/CD pipeline runs again
+Liquibase applies rollback or corrected changes
+
+
+9) kafka vs ETL
+⚖️ When to use what
+
+👉 Use Kafka if:
+Need near-zero downtime
+Continuous sync required
+Large production systems
+
+👉 Use ETL if:
+One-time migration
+Data warehouse loading
+Small/medium datasets
+
+10) How kafka treats SQL transaction or connection
+
+👉 Kafka does NOT think in terms of “SQL connections” or “SQL processes.”
+It works with events/messages, and in database migration those events are usually row-level changes.
+
+🧠 What Kafka actually sees
+
+With CDC tools like Debezium feeding Apache Kafka:
+
+Each row change → becomes a message/event
+Not:
+❌ a DB connection
+❌ a full SQL query
+But:
+✅ INSERT / UPDATE / DELETE at row level
+🔍 Example
+SQL transaction
+BEGIN;
+UPDATE users SET name='A' WHERE id=1;
+UPDATE users SET name='B' WHERE id=2;
+COMMIT;
+Kafka events (simplified)
+Event 1 → {id:1, operation:UPDATE, name:'A'}
+Event 2 → {id:2, operation:UPDATE, name:'B'}
+
+👉 So:
+
+1 transaction → multiple events
+Each row change = 1 Kafka message
+🔗 What about transactions?
+CDC tools capture:
+Transaction ID
+Commit order
+Kafka preserves:
+Order (within partition)
+
+👉 Consumers can reconstruct transactions if needed
+
+📦 Partitioning (important)
+Events are usually partitioned by:
+Primary key
+
+👉 Ensures:
+
+Updates to same row stay ordered
+⚠️ Important clarification
+Kafka doesn’t understand:
+SQL joins
+Stored procedures
+Complex queries
+
+👉 It only streams data changes
+

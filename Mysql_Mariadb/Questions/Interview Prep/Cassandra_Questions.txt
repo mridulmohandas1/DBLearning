@@ -1,0 +1,597 @@
+1) When SSTables are created?
+SSTables, or Sorted String Tables, are created when a memtable (in-memory write cache) is flushed to disk. This process happens periodically as the memtable fills up, ensuring data persistence. SSTables are immutable, meaning they are never modified after creation.
+
+2) What happens when data updated in terms of SSTable?
+SSTables are immutable, so updates to data create a new SSTable file instead of changing the existing ones. For each SSTable the database creates an index file and a data file. The index file helps locate data faster in the sorted data file. An SSTable uses a Log-Structured Merge (LSM) tree data structure format
+
+3) What is tombstone?
+a tombstone is a special marker used to indicate that data has been deleted. Instead of immediately removing data from storage, Cassandra writes a tombstone to mark the deleted data and prevents it from being returned during reads.
+
+4) How tombstones are removed?
+tombstones are removed during a process called compaction. Cassandra doesn't delete data immediately upon deletion, but instead marks it as a tombstone. These tombstones are then removed during scheduled compactions after a grace period, controlled by the gc_grace_seconds setting. 
+
+5) Why tombstones are used?
+Cassandra is a distributed system, and deleting data immediately can be complex across multiple nodes. 
+Tombstones help maintain consistency in a distributed environment
+Tombstones can improve write performance compared to immediately deleting data, as they don't involve immediate physical deletion. 
+
+6) What are the best compaction method for read, write performance
+Leveled Compaction Strategy (LCS) --> Read
+SizeTieredCompactionStrategy (STCS) --> Write
+
+7) What is read repair?
+Read repair in Apache Cassandra is a process that ensures data consistency by updating replicas during read operations. It helps to maintain data integrity across the cluster by detecting and resolving inconsistencies between replicas
+
+8) What is SSTable?
+SSTable (Sorted Strings Table) is a persistent, immutable, and ordered set of files on disk used for storing data. SSTables are created when a Memtable is flushed to disk, and they are not modified after creation. 
+
+--------
+
+9) Adding a new node (often called bootstrapping)
+Node Preparation and Installation
+Install Cassandra: Install the exact same version of Apache Cassandra on the new machine as is running on the existing cluster nodes.
+Ensure Clean State: If Cassandra was started previously on the new machine, stop the service and clear its data directories (data, commitlog, and hints folders) to ensure a clean bootstrap.
+2. Configuration (cassandra.yaml)
+Edit the primary configuration file, cassandra.yaml, on the new node to enable it to join the cluster.
+Parameter	Configuration	Notes
+cluster_name	<Existing Cluster Name>	Must match the name of the existing cluster.
+seeds	<IP Address of existing seed nodes>	List the IP addresses of at least one existing seed node in the cluster. Do not list the IP of the new node itself here.
+listen_address	<New Node's IP Address>	The IP address other cluster nodes use to communicate with the new node.
+rpc_address	<New Node's IP Address or 0.0.0.0>	The IP address for client connections (like cqlsh).
+auto_bootstrap	true (Default)	This parameter, which defaults to true, must be enabled for the node to automatically stream data and join the ring. If it was explicitly set to false, change it to true.
+Snitch Config	(See below)	Ensure the rack and DC settings match your cluster topology.
+
+Export to Sheets
+Snitch Configuration
+If you use the GossipingPropertyFileSnitch, you must also configure the new node's Data Center and Rack in the cassandra-rackdc.properties file to match your cluster's topology:
+
+Properties
+dc=<Data Center Name>
+rack=<Rack Name>
+3. Start Bootstrap
+Once configured, start the Cassandra service on the new node.
+
+Bash
+# Example for a systemd-based distribution
+sudo systemctl start cassandra
+The node will automatically perform the bootstrapping process:
+It contacts the seed nodes to learn the cluster topology.
+It calculates its assigned token ranges (if using vnodes, it automatically takes a share).
+It streams the required data from the existing replica nodes.
+During this process, the node's status will be UJ (Up/Joining).
+4. Verification and Cleanup
+Verify Status: On any node in the cluster, check the status using nodetool:
+Bash: nodetool status
+Wait until the new node changes its status from UJ to UN (Up/Normal), indicating it has successfully joined and finished streaming data.
+Run Cleanup: After the new node is fully bootstrapped, run nodetool cleanup on all the previously existing nodes. This command tells the old nodes to remove the data they no longer own because the new node has taken over those token ranges.
+Bash: nodetool cleanup
+Crucially, run cleanup on one node at a time, and wait for it to complete before moving to the next node. Cleanup is a heavy operation and is best scheduled during low-usage hours.
+
+--------
+
+10) Should we set vnode manually?
+No, you should not set vnode (Virtual Node) tokens manually for a new Cassandra cluster.(Introduced the vnodes feature on Cassandra 1.2, Enabled vnodes by default Cassandra 2.0)
+The entire purpose and primary benefit of Virtual Nodes, which have been the default since Cassandra 1.2, is to automate token assignment and data rebalancing.
+Single Token (Manual):
+Requires manual calculation of token ranges for every node and configuration via initial_token.
+Adding or removing a node requires recalculating tokens for all nodes and using nodetool move to rebalance.
+Data must be streamed from a limited number of remaining replicas, making the process slow
+
+Virtual Nodes:
+Only requires setting num_tokens.
+The new node automatically takes an even share of data from existing nodes (Auto-Rebalancing).
+Data is streamed from many nodes across the cluster, which speeds up node replacement/repair.
+
+--------
+
+11) Single token vs virtual node
+Virtual Nodes:
+
+A Virtual Node (vnode) in Cassandra is a feature where a single physical Cassandra server (node) is assigned multiple, smaller, non-contiguous token ranges on the cluster ring, effectively acting as many "virtual" nodes.
+
+Automatic (num_tokens). Each physical node is assigned many smaller, non-contiguous token ranges (vnodes).
+Automatically provides a much more even data and workload distribution across the cluster.
+Easy and automatic. A new node takes small, balanced chunks of data from all existing nodes, distributing the scaling load and minimizing downtime.
+Fast. Data is streamed from many nodes across the cluster, leveraging parallel I/O for quick rebuilds.
+
+Single Token:
+A single token in Cassandra refers to the legacy architecture where a single physical node in the cluster is manually assigned one token on the hash ring.
+
+Manual (initial_token). Each physical node is assigned one large, contiguous token range. (older menthod)
+Higher risk of hotspots (uneven data/load) and requires complex manual calculation to achieve initial balance.
+Difficult and expensive. Adding a node requires manually calculating new token ranges for all nodes and using nodetool move to rebalance, involving massive data streaming.
+Slow. Data is streamed from a limited number of adjacent replica nodes, which can be a bottleneck.
+
+11.1) num_tokens vs initial_token
+
+num_tokens — Number of Virtual Nodes (vnodes), Default on modern Cassandra (4.x+)
+	Purpose: Controls how many token ranges a node owns in the ring — essentially how many vnodes it has. Each token corresponds to a virtual node.
+	Cassandra uses vnodes to automatically balance data and make scaling, bootstrapping, and repairs easier.
+	When vnodes are enabled, Cassandra will randomly pick num_tokens tokens during bootstrap to distribute load evenly.
+	Set a reasonable num_tokens (e.g., 16 or 32) in cassandra.yaml. Higher token values give better distribution but more overhead.
+Key notes:
+	Default on modern Cassandra (4.x+) is typically 16 tokens per node.
+	Higher values mean more, smaller token ranges → better data distribution but more overhead.
+	If you do not set initial_token, this random generation controls placement.
+	initial_token will override this on the first start if set.
+
+initial_token — Manual Token Assignment
+	Purpose: Lets you manually assign token values to the node.
+	Each value in initial_token represents a position in the token ring.
+	Useful in a non-vnodes setup (i.e., when each node owns exactly one token range) or when you want careful control over token placement.
+Key behavior:
+	If vnodes are disabled (num_tokens set to 1 or left unset), then initial_token determines where that single token sits in the ring.
+	If you set both num_tokens and initial_token (with multiple tokens provided), Cassandra may use the list you provided instead of random allocation, but in typical vnode usage you don’t need to manually pick values.
+
+11.2) When to set num_tokens?
+Before adding a new node to a running cluster, set num_tokens on that node so that it gets the correct number of vnode ranges that match the cluster’s configuration. Don’t change num_tokens after the node has joined, as this won’t rebalance existing data without decommissioning and re-adding the node.
+	Default ~16 (modern Cassandra) — sensible balance between distribution and overhead.
+	Higher values (e.g., 128 or 256) — used historically for very large clusters to reduce data variance per node (default in older versions).
+	1 — disables vnodes (legacy single token per node). Only use this when you know exactly where to place tokens or in very specific cases.
+
+
+
+--------
+
+12) Number of SStables created for Cassandra insertion?
+
+Scenario A: Both Inserts Occur Before a Flush
+
+Write 1 → Writes to Memtable + Commit Log.
+
+Write 2 → Writes to the same Memtable + Commit Log.
+
+Memtable Flushes → All data from both writes is written to a single, new SSTable.
+
+Result: 1 SSTable is created.
+
+Scenario B: A Flush Occurs Between the Inserts
+
+Write 1 → Writes to Memtable A + Commit Log.
+
+Memtable A Flushes → SSTable 1 is created.
+
+Write 2 → Writes to Memtable B (the new, active Memtable) + Commit Log.
+
+Memtable B Flushes → SSTable 2 is created.
+
+Result: 2 SSTables are created.
+
+12.1) IS sstable creating per table basis?
+Yes — in Apache Cassandra, SSTables (Sorted String Tables) are created on a per-table basis. Each table has its own set of SSTables stored in the file system, under the directory for that keyspace and table.There isn’t a shared SSTable file across multiple tables.
+
+--------
+
+13) What is compaction?
+Compaction in Cassandra is a critical background maintenance process that merges multiple SSTables (Sorted String Tables) into one or more new SSTables, discarding obsolete data in the process. 
+It is necessary because SSTables are immutable (they cannot be modified) once written to disk. Any INSERT, UPDATE, or DELETE operation creates a new version of the data in a new SSTable. Over time, a single row can be spread across many SSTables, leading to performance
+
+--------
+
+14) Does compaction create new sstable or it will use the same name?
+Yes, compaction always creates new SSTables with a new, unique identifier (and thus a new name). It never overwrites or uses the same name as the original files. This behavior is fundamental to Cassandra's design because SSTables are immutable (cannot be modified after being written to disk).
+
+Read and Merge: Cassandra selects one or more existing SSTables for compaction. It reads the data from these old files, merges the different row versions (applying "last-write-wins" based on timestamps), and prunes deleted data (tombstones) and expired TTL data.
+Write New SSTable: The result of this merge is written as one or more entirely new SSTables, each receiving a unique, sequential SSTable identifier (generation number).
+Temporary Coexistence: For a short period, the new SSTables and the old SSTables coexist on disk, causing a temporary spike in disk usage. This is necessary so that ongoing read operations that might still be referencing the old files can complete without failure.
+Delete Old Files: Once Cassandra confirms that all new data has been successfully written and no pending reads are referencing the old SSTables, the original files are marked for deletion and eventually removed from the file system. This is when disk space is finally reclaimed.
+
+--------
+
+15) What all event invokes compaction?
+
+Memtable Flush --> Initial Trigger: When a Memtable is flushed to disk, a new SSTable is created. This event frequently triggers the Compaction Manager to check if any existing SSTables now meet the criteria for a minor compaction.
+SSTable Count/Size Threshold --> Size-Tiered Compaction Strategy (STCS) (Default): Compaction is triggered when a configurable number of similarly-sized SSTables (default is 4) are on disk.
+Level Overlap/Size Limit --> Leveled Compaction Strategy (LCS): Compaction is triggered when a level (L1, L2, etc.) exceeds its allowed size limit, or when a new SSTable from a lower level needs to be merged into a higher level to maintain the non-overlapping data guarantee.
+Time Window Expiration --> Time Window Compaction Strategy (TWCS): Compaction is triggered at the end of a configurable time window (e.g., end of the hour or day) to merge all SSTables created during that window into a single, consolidated SSTable.
+Tombstone Overload --> Tombstone Compaction: A specific type of compaction is triggered when the ratio of garbage-collectable tombstones to all columns in an SSTable exceeds the configured tombstone_threshold (default is 0.2).
+Periodic Check --> The Compaction Manager checks for pending compaction work approximately every five minutes (configurable) and submits tasks if conditions are met.
+
+--------
+
+16) How to ensure the replicated copies are available across DC and rack?
+
+Summary:
+Update cassandra.yaml
+	endpoint_snitch: GossipingPropertyFileSnitch
+update cassandra-rackdc.properties
+update keypsace with network topology and dc and rack details
+
+1. Choose and configure the Snitch
+
+A “snitch” tells Cassandra about the network topology. For multiple DCs and racks, use GossipingPropertyFileSnitch (recommended for production).
+Edit cassandra.yaml.In the cassandra.yaml file on every node:
+	endpoint_snitch: GossipingPropertyFileSnitch
+This snitch uses the cassandra-rackdc.properties file (next step) and shares DC/rack info with other nodes via gossip.
+
+2. Set datacenter and rack per node
+Each node in your cluster must know: Which datacenter it belongs to Which rack within that datacenter
+Edit the cassandra-rackdc.properties file on each node:
+	dc=DC1
+	rack=RACK1
+Examples:
+Node in datacenter DC1, rack RACK1:
+	dc=DC1
+	rack=RACK1
+Node in datacenter DC2, rack RACK1:
+	dc=DC2
+	rack=RACK1
+Node in datacenter DC2, rack RACK2:
+	dc=DC2
+	rack=RACK2
+These names are case-sensitive.
+
+3. Configure seed nodes
+Put at least one seed node in each datacenter (preferably two per DC). Seeds help nodes find each other and spread the topology information.
+In cassandra.yaml on every node, list all seed IPs (e.g., seeds from both DCs):
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "192.168.1.10,192.168.2.10"
+Don’t put all nodes as seeds — usually 1–2 per DC is enough.
+
+4. Start nodes in the right order
+When bootstrapping:
+Start the seed nodes first (one from each datacenter).Then start the other nodes in each DC.
+Cassandra will gossip and form the cluster across DCs.
+
+5. Use a rack-aware replication strategy
+In Cassandra, you define keyspaces with replication settings. For multi-DC deployments, use NetworkTopologyStrategy:
+
+CREATE KEYSPACE myks
+WITH replication = {
+  'class': 'NetworkTopologyStrategy',
+  'DC1': '3',
+  'DC2': '3'
+};
+
+
+This means:
+In DC1, there will be 3 replicas
+In DC2, there will also be 3 replicas
+Cassandra will try to place replicas in different racks if available (improving fault tolerance).
+
+Verify the topology
+After starting the cluster, run:
+nodetool status
+
+
+--------
+
+17) Why should we use snapshot for backup why don't we use direct file copy?
+The primary reason to use nodetool snapshot is to ensure you capture a consistent view of the data at a single point in time on the node.
+
+Snapshot:
+Flushes all in-memory data (memtables) to new SSTables on disk before creating the backup. The snapshot is complete
+The operation is essentially atomic for all SSTables. It's a single, quick logical action
+
+Direct file copy:
+Ignores data in memtables. The backup will be incomplete, missing recent writes and updates.
+The copy is sequential and takes time. Data is still being written to the original files, leading to a read-write conflict and a potentially corrupt/inconsistent set of copied files.
+
+--------
+
+18) How incremental backup works?
+Incremental backup is enabled by setting incremental_backups: true in the cassandra.yaml configuration file on each node.
+
+1. The Trigger: Memtable Flush
+Cassandra writes all new data first to the memtable (in-memory structure) and the commit log (on-disk log). The incremental backup process kicks in when the memtable is flushed to disk.
+2. The Action: Hard Linking
+When a memtable is full and is flushed to a new, immutable SSTable file on disk, Cassandra performs the following action automatically:
+It creates a hard link to this brand new SSTable file.
+The hard link is placed in a special directory: data/<keyspace_name>/<table-UUID>/backups/.
+This hard link acts as the incremental backup—it's a pointer to the newly created data file. Since a hard link doesn't copy the file contents, the process is instantaneous and consumes almost no extra disk space (just space for the link metadata).
+
+--------
+
+19) When memtable will flush?
+	1) Memory Threshold Exceeded
+	2) Time Limit Exceeded
+	3) When commitlog approaches its max limit
+
+--------
+
+20 Important file paths:
+
+Package install (RPM/DEB) --> /etc/cassandra/cassandra.yaml
+Manula --> <CASSANDRA_HOME>/conf/cassandra.yaml
+Package install (RPM/DEB) --> /etc/cassandra/cassandra-rackdc.properties
+Manual --> <CASSANDRA_HOME>/conf/cassandra-rackdc.properties
+JVM environment variables --> cassandra-env.sh
+Controls commit log archiving behavior --> commitlog_archiving.properties
+Logging configuration --> logback.xml
+
+
+21) How to configure commit log archiving?
+open /etc/cassandra/commitlog_archiving.properties file. set the parameter: archive_command=/path/to/your/archive/script.sh %path %name
+After setting the parameter each commit log segment is linked into your backup directory.
+
+
+22) What is commit log archive?
+Every write is first appended to the commit log on disk before Cassandra acknowledges it and writes it to an in-memory memtable.If the node crashes, Cassandra can replay the commit log on restart to recover any writes that weren’t yet flushed to SSTables.
+Instead of letting old commit log segments be deleted after their data is flushed to SSTables, you archive those segments to a backup location. This allows for point-in-time recovery (PITR) — i.e., you can restore the database state up to a specific moment using archived commit logs plus snapshots.
+
+23) What is partition key?
+The partition key consists of one or more columns defined at the start of the PRIMARY KEY in a Cassandra table.
+If there are multiple columns in the partition key, it’s called a composite partition key.
+Cassandra uses the partition key as input to a hash function. The resulting hash value (called a token) decides which node(s) in the cluster will store that row. This enables efficient, distributed storage of data across the cluster.
+
+--Partition Key vs Clustering Columns
+	The partition key chooses the partition and node.
+	Clustering columns (the rest of the primary key) determine the order of rows within that partition.
+
+24) Data read flow
+
+Summry: Read --> coordinator node --> locate replica nodes own the data node using partition key --> check memetable for the data, if not present --> locate sstable using bloom filter --> using partition key / partition index locate the data --> merge result and sent back coordinator node 
+
+Query Coordinator Selection
+	Any node in the cluster can serve as the coordinator for a read.
+	The coordinator uses the partition key to determine which replica nodes own the data. The token of the key guides this lookup via the ring/range.
+
+Replica Read and Consistency
+	The coordinator sends read requests to the replicas that own the partition.
+	Based on the consistency level (e.g., ONE, QUORUM, LOCAL_QUORUM, ALL), it waits for the appropriate number of responses to satisfy the read.
+
+Memtable and Caches
+Once a replica receives the request, it begins its internal read path:
+	a. Memtable: First, it checks the memtable (in-memory write buffer) for the latest data for that partition.
+	b. Row Cache: If row caching is enabled and the data is cached, Cassandra may serve the read directly from the row cache.
+
+Bloom Filter
+	Cassandra uses bloom filters to test whether each SSTable might contain the requested partition.
+	If the filter says “no,” that SSTable is skipped (helps avoid unnecessary disk I/O).
+
+Partition Key Cache / Index
+	If a partition key cache entry exists for that key, Cassandra uses it to jump straight to the right place in the SSTable.
+	Otherwise, Cassandra reads the partition summary and then the partition index to locate the data offset.
+
+SSTable Data Fetch
+	Once the location is known, Cassandra reads the data from the SSTable on disk.
+	Because multiple SSTables may contain older fragments of this partition (due to flushes and compactions), all relevant SSTables are read and merged.
+
+Merging Results
+Cassandra merges data from:
+	Memtables (most recent),
+	Any SSTables that might have fragments,
+	Row and key caches (if used),
+It respects the timestamps so that the most recent version of each column/row is returned.
+
+Return and Optional Read Repair
+	The merged result is returned to the coordinator, which may also perform read repair if the consistency level requires it.
+	Read repair checks replicas for outdated data and updates them in the background (or foreground for stronger consistency levels).
+
+24) Application connection string
+
+25) Memtable vs read cache
+
+26) what is LSM-Tree Storage Model
+Cassandra uses an LSM (Log-Structured Merge) tree design:
+	Writes go to commit log + memtable → flush to SSTables.
+	Reads must check multiple locations (memtable + multiple SSTables), making the read path inherently more complex than a typical B-tree system.
+
+27) Why to read multiple sstable for the actual data
+Because updates and deletes create new entries (with later timestamps) instead of modifying old SSTables, a single logical row may have fragments stored across several different SSTables. Each of those older versions might still be needed to reconstruct the latest state of the row at read time.
+
+28) Does the compaction delete older sstable?
+Yes — compaction in Cassandra does delete older SSTables
+Merges multiple SSTables into a new SSTable:
+	Compaction reads several existing SSTables, merges their contents (keeping the latest values by timestamp), applies tombstones (deletes), and writes the result into a new SSTable file.
+Old SSTables get deleted:
+	After the new SSTable is written and any pending reads that need the old files have finished, Cassandra removes the old SSTable files from disk and reclaims that disk space.
+Deletion happens only after the new SSTable is ready and Cassandra ensures no in-flight reads still depend on the old files.
+Tombstones and expired data removal:
+	Compaction also lets Cassandra remove tombstones (delete markers) and any TTL-expired rows once they are no longer needed — but only if the tombstone is old enough (older than gc_grace_seconds) and safe to remove.
+
+29) What Happens If You Try to Query Without Using the Partition Key
+If you try to read data without specifying the partition key in a SELECT query, Cassandra can’t efficiently locate which partition(s) might contain the rows. Instead of directly looking up a partition, it would have to scan across many nodes — which Cassandra does not allow by default for performance reasons. In such cases:
+Cassandra will return an error unless you explicitly use ALLOW FILTERING, which forces a full scan and can be very slow.
+Alternatively, you can create indexes on non-partition columns — but secondary indexes also have limitations and performance costs.
+
+30) Secondary index?
+In Apache Cassandra, a secondary index (often called 2i) is an index you explicitly create on a column that is not part of the primary key. 
+A secondary index lets Cassandra build an index on a column other than the partition key,
+It’s implemented as a hidden index table on each node — separate from your data table — that maps column values to the primary keys (partitions) that contain those values.
+
+31) Cassandra performance issue check
+Possible causes:
+	Bad data model (hot partitions, wrong partition keys).
+	Inefficient queries (e.g., range scans, ALLOW FILTERING).
+	Excessive tombstones from deletes with no compaction.
+	Many small SSTables clogging reads (needs compaction).
+Check Logs:
+Start with logs on the coordinator or replica nodes:
+	Cassandra system logs (e.g., system.log) show errors, exceptions, timeouts, GC issues, etc.
+	Client logs can reveal whether errors are from the driver/client or Cassandra.
+	Look for common exceptions like:
+	UnavailableException → insufficient replicas available.
+	ReadTimeoutException / WriteTimeoutException → query didn’t complete within configured time.
+	NoHostAvailable → client can’t connect to any node.
+Tools to Use:
+	nodetool status — shows node states (Up/Down) and token distribution.
+	nodetool tablestats — stats per table (SSTable count, tombstones).
+	nodetool compactionstats — check if compaction is pending or stuck.
+	CQL tracing (TRACING ON;) — see query execution steps and latencies.
+
+Resolution
+
+Timeouts & Latency:
+If reads/writes timeout:
+	Check replica load and disk speed (slow disks raise I/O wait).
+	Increase timeouts in cassandra.yaml temporarily.
+	Reduce consistency level if appropriate (LOCAL_ONE instead of QUORUM for local reads).
+	Large partitions or too many SSTables can slow reads.
+	Too many tombstones (garbage from deletes) can slow queries.
+
+Node Unavailability:
+If nodes are down or unreachable, look at:
+	Network issues (firewalls, wrong seed node configs).
+	Hardware/resource exhaustion (out of disk, OOM).
+	Cluster ring imbalances (check token distribution with nodetool status).
+
+Performance Degradation:
+Possible causes:
+	Bad data model (hot partitions, wrong partition keys).
+	Inefficient queries (e.g., range scans, ALLOW FILTERING).
+	Excessive tombstones from deletes with no compaction.
+	Many small SSTables clogging reads (needs compaction).
+
+32) How to enable authentication is Cassandra?
+By default Cassandra uses:
+	authenticator: AllowAllAuthenticator
+which does not require credentials — anyone can connect.
+To require login with username and password, you switch to:
+	authenticator: PasswordAuthenticator
+Cassandra stores user credentials in the internal system_auth keyspace and checks them when clients connect.
+
+33) What is snitch
+In Apache Cassandra, a snitch is a crucial component that helps the database understand the network topology of your cluster. It tells Cassandra which nodes belong to which datacenters and racks (logical or physical groupings).
+In development → use SimpleSnitch (default).
+In production → almost always use GossipingPropertyFileSnitch (set in cassandra.yaml → endpoint_snitch: GossipingPropertyFileSnitch), and define your topology in cassandra-rackdc.properties on each node, for example:
+
+34) what does nodetool decommission
+nodetool decommission gracefully removes a live Cassandra node from the cluster by:
+	Announcing it’s leaving the cluster
+	The node changes its state to LEAVING and informs other nodes via gossip.
+	Stops acting as coordinator for new writes
+	It will no longer accept new client write requests as a coordinator, but it continues to serve replica writes from other coordinators during the data transfer.
+	Streams all of its data to other nodes
+	For the token ranges this node owns, it streams that data directly to the remaining nodes that will take over those ranges. This ensures data is not lost when the node leaves.
+	Updates the cluster’s ring topology
+	Once streaming finishes, the node’s tokens are removed from the token ring so other nodes own those ranges instead. The cluster gossip updates so all nodes know the departing node is gone.
+	Node stops and is removed from the cluster status
+	After decommissioning completes, the node shuts down Cassandra and will no longer appear in nodetool status output.
+
+35) Is it possible to create table without primary\partitionkey
+No — you cannot create a table in Apache Cassandra without a primary key. Every Cassandra table must have at least one primary key, because the database uses the primary (partition) key to determine where and how data is stored in the cluster.
+
+36) what all data type supports partition key in Cassandra?
+Yes — only certain Cassandra data types can be used as a partition key because the partition key must be hashable and appropriate for distributing data evenly across the cluster.
+supporting data types:
+ASCII – ASCII text
+TEXT / VARCHAR – UTF-8 encoded strings
+INT / BIGINT / SMALLINT / TINYINT – integer types
+FLOAT / DOUBLE / DECIMAL – floating point and decimal numbers
+BOOLEAN – true/false
+INET – IP addresses
+TIMESTAMP / DATE / TIME – date/time types
+UUID / TIMEUUID – unique identifiers
+
+Not supporting: 
+list<>, set<>, map<>
+
+37) What is consistency?
+Cassandra doesn’t force a single strict consistency model globally. Instead, for every read or write, you specify a consistency level that controls how many replicas must acknowledge the operation before it’s considered successful.
+The consistency level affects how up-to-date the data you read or write will be:
+	Strong consistency: more nodes must agree, so reads return the latest value.
+	Eventual consistency: fewer replicas need to respond; inconsistencies are resolved over time.
+📌 Example Rule (Strong Consistency Condition)
+A commonly used formula for strong consistency (ensuring reads see the most recent writes) is:
+R + W > N
+Where:
+	R = number of replicas required for a read,
+	W = number of replicas required for a write,
+	N = total number of replicas (replication factor).
+If this holds (e.g., both read and write use QUORUM with replication factor 3), the system can ensure strong consistency for those operations.
+Common Consistency Levels
+Consistency Level	Behavior
+ANY	                Write succeeds if any node (or a hinted handoff) receives it; lowest consistency, highest availability.
+ONE	                Operation succeeds after one replica responds; faster but weaker consistency.
+QUORUM	                Majority of replicas must respond; balances consistency & availability.
+LOCAL_QUORUM	        Quorum within the local datacenter; useful for multi-DC setups.
+ALL	                All replicas must respond; strongest consistency but lowest availability.
+SERIAL / LOCAL_SERIAL	Used for Paxos-based lightweight transactions with linearizable consistency.
+
+38) Backup recommendations for large databases
+Option	                           Best For	                        Notes
+Medusa	                           Production clusters with heavy data	Automated backups + cloud storage + cluster restores
+Snapshot + Incremental (nodetool)  Good manual/custom workflow	        Simple, flexible but needs scripting/automation
+Commercial/Managed Backup	   Enterprise with compliance/DR needs	Adds SLA, automation, UI, support
+
+Restoring usually involves copying snapshots and incremental SSTables back to nodes and running nodetool refresh or using tools like sstableloader.
+For full cluster restores or topology changes, Medusa simplifies the process and handles token maps/schema correctly.
+
+39) Version upgrade using tarball
+Back up data and configuration.
+On each node (one at a time):
+	Drain and stop Cassandra.
+	Remove/rename old binaries.
+	Download and extract the new tarball.
+	Merge configurations.
+	Start Cassandra.
+(If needed) run nodetool upgradesstables.
+Validate the cluster after all nodes are upgraded.
+
+40) How to enable incremental backup?
+When enabled:
+	You take a snapshot (full backup)
+	Cassandra creates hard links of new SSTables into a folder called:
+	<keyspace>/<table>/backups/
+
+Every time new SSTables are created:
+	They are automatically copied to backups folder.
+	This is why Cassandra incremental backup is very lightweight.
+To enable incremental: in cassandra.yaml set:
+	incremental_backups: true
+
+41) Data Encryptions?
+1️⃣ Encryption in Transit (Node-to-Node & Client-to-Node)
+Cassandra supports SSL/TLS encryption for:
+✅ Node-to-Node (Inter-node encryption)
+	Protects communication between cluster nodes (important in multi-DC setups).
+Configured in:
+	server_encryption_options:
+Modes:
+	none
+	rack (encrypt across racks)
+	dc (encrypt across datacenters)
+	all (encrypt all inter-node traffic)
+	Recommended for production: dc or all
+
+✅ Client-to-Node Encryption
+Encrypts traffic between application and Cassandra.
+Configured in:
+	client_encryption_options:
+Prevents:
+	Credential sniffing
+	MITM attacks
+	Data interception
+
+Option A: OS-Level Disk Encryption (Common in OSS Cassandra)
+Use:
+	LUKS (Linux)
+	Cloud provider disk encryption (AWS EBS, Azure Disk Encryption, etc.)
+This protects:
+	SSTables, Commit logs, Snapshots, Backups
+
+✔ Simple
+✔ Minimal Cassandra configuration
+⚠ Does not protect against privileged OS users
+
+Option B: Transparent Data Encryption (TDE)
+Available in:
+	Apache Cassandra (newer versions)
+	Enterprise distributions like DataStax
+Encrypts:
+	Commit logs, Hints, SSTables (configurable)
+
+Configured in:
+	transparent_data_encryption_options:
+
+Uses:
+	AES encryption
+	Java Keystore (JKS) for key storage
+
+
+3️⃣ Commit Log Encryption
+You can specifically encrypt:
+	Commit logs
+This is important because commit logs contain raw writes before compaction.
+
+4️⃣ Backup & Snapshot Encryption
+Important for DBRE perspective:
+If using:
+	nodetool snapshot
+	File-system backups
+	Cloud snapshots
+Ensure:
+Underlying disk encryption is enabled OR Backup storage is encrypted (S3 SSE, Azure Blob encryption)

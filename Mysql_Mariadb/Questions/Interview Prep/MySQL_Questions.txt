@@ -1,0 +1,1712 @@
+Port: 3306
+Conf: my.cnf
+
+--MySQL Version
+
+Older version 5.0
+
+Latest version: 9.6
+
+--Installation methods
+
+| Installation Method     | Description                                                   | Typical Use Case                           |
+| ----------------------- | ------------------------------------------------------------- | ------------------------------------------ |
+| APT / YUM Repository    | Install MySQL using Linux package managers                    | Linux production servers                   |
+| RPM / DEB Packages      | Download and install individual OS-specific packages          | Controlled Linux installations             |
+| Generic Binary Package  | Download precompiled MySQL binaries and configure manually    | Custom installations                       |
+| Source Code Compilation | Compile MySQL from source                                     | Custom builds and specialized environments |
+| MySQL Installer         | GUI-based installation for Windows                            | Windows installations                      |
+| Docker Container        | Deploy MySQL using a container image                          | Development, testing, microservices        |
+| Kubernetes Operator     | Deploy and manage MySQL using Kubernetes orchestration        | Containerized production environments      |
+| Cloud Managed Service   | Use managed MySQL services without managing the underlying OS | Cloud environments                         |
+
+
+1) What happens restoring a MySQL database into an existing database?
+When restoring a MySQL database into an existing database, the existing data is typically overwritten or replaced by the restored data. This means the data within the existing database will be lost and replaced with the data from the restore. To prevent data loss, it's crucial to back up the existing database before performing a restore operation. 
+
+2) How to import single table to existing database?
+	1) Take dump of single database
+	2) Log into target database --> Restore the file using MySQL utility
+
+
+Query Parsing & Optimization
+Parsing: 
+	MySQL parses the SQL text into an internal format it can understand.
+Optimization / Planning: 
+	The Query Optimizer determines the most efficient way to execute the query — which indexes to use, join order, etc. You can see this plan using EXPLAIN.
+Most modern MySQL installations use the InnoDB storage engine.
+Buffer Pool:
+	This is an in-memory cache for pages (data and indexes).
+	If a needed page is already in memory, MySQL reads it from the buffer pool — fast, no disk I/O.
+	If the page isn’t in memory, MySQL reads it from disk into the buffer pool, then uses it.
+Index or Table Access:
+Using Indexes
+	If there’s an index that supports the WHERE clause (e.g., on id), MySQL uses it.
+	It looks up the key in the B-tree index structure — saving scanning through all rows.
+Full Table Scan
+	If no good index exists, MySQL may scan the entire table page by page.
+	Some queries can be answered directly from the index alone (called a covering index), avoiding reading the full data row.
+Row Versioning and MVCC
+InnoDB uses multi-version concurrency control (MVCC):
+	It may serve the consistent snapshot of rows that existed at the start of the transaction.
+	For each row read, InnoDB checks visibility rules to decide whether that version should be returned.
+This allows high concurrency without heavy locking.
+
+4) Types of storage engines
+InnoDB:
+	Default and most widely used engine (since MySQL 5.5).
+	Supports transactions, ACID compliance, foreign keys, row-level locking, and crash recovery.
+	Great for high reliability, concurrency, and general OLTP workloads.
+
+MyISAM:
+	Older engine (was the default before InnoDB).
+	No transactions or foreign keys; table-level locking.
+	Can be faster for simple read-heavy workloads, but less safe for concurrent writes.
+
+MEMORY:
+	Stores data in RAM for extremely fast access.
+	Data disappears when the server restarts.
+	Suitable for temporary or caching tables.
+
+CSV:
+	Stores table data in plain text CSV files.
+	Useful for simple data export/import tasks, but has no indexes.
+
+ARCHIVE:
+	Designed for archiving large volumes of data.
+	Supports only INSERT and SELECT, and compresses stored records.
+	Good for log storage or historical data.
+
+5) What binlog or binary log?
+In MySQL, the binary log (often called binlog) is a special log file that records all changes made to the database data and structure — not the normal SELECT reads, but operations that insert, update, delete, or modify tables and databases.
+	The binary log contains a sequence of events that describe data changes (like INSERT, UPDATE, DELETE) and schema changes (like CREATE TABLE, ALTER TABLE).
+	It is stored in a binary format — not directly human readable — but you can inspect it using tools like mysqlbinlog.
+	It does not record simple queries that don’t modify data (e.g., SELECT, SHOW).
+
+6) How to archive binlog?
+Using MySQL Configuration
+In your server config file (my.cnf or my.ini):
+[mysqld]
+binlog_expire_logs_seconds = 604800
+binlog_expire_logs_auto_purge = ON
+
+binlog_expire_logs_seconds: how long (in seconds) binary logs are kept before auto deletion (e.g., 7 days = 604800 seconds).
+binlog_expire_logs_auto_purge: if ON, enables automatic cleanup of old binlogs.
+Setting binlog_expire_logs_seconds to 0 disables automatic purging.
+Older MySQL versions use expire_logs_days instead of seconds (e.g., expire_logs_days=7).
+
+7) Troubleshoot Performance issue?
+Monitor metrics like:
+
+Query execution time and throughput
+Number of active connections
+CPU, memory, and disk I/O
+Buffer pool hit ratios
+Slow query rate
+Replication lag (if using replication)
+These help spot bottlenecks early.
+
+Useful MySQL commands include:
+	SHOW GLOBAL STATUS;
+	SHOW PROCESSLIST;
+	SHOW ENGINE INNODB STATUS;
+These show running queries, locks, thread status, and InnoDB internals — good for spotting long-running queries or lock contention.
+
+Enable & Analyze Slow Query Logs:
+	SET GLOBAL slow_query_log = 'ON';
+	SET GLOBAL long_query_time = 2;  -- log queries slower than 2 seconds
+You can adjust the threshold (long_query_time) to capture relevant slow queries.
+
+	Analyze the Logs
+	Use built-in tools like mysqldumpslow to summarize slow log entries.Or use pt-query-digest (from Percona Toolkit) to get a ranked list of slowest or most expensive queries. By doing this, you identify which queries are hurting performance the most.
+
+
+Analyze & Optimize Queries:
+Once you find problematic queries: 
+Use EXPLAIN
+Running:
+	EXPLAIN SELECT …
+
+Tune Server Configuration:
+Important Settings to Review
+	innodb_buffer_pool_size — should be large enough to hold your working dataset (often 70–80% of RAM).
+	tmp_table_size / max_heap_table_size — increasing avoids writing temp tables to disk.
+	max_connections — make sure it’s not too low if you have many clients.
+	Query caches (deprecated in MySQL 8) should be turned off or understood before use.
+
+8) Analyse SHOW ENGINE INNODB STATUS
+
+Problem	                        Status Clue
+Lock contention	                High waits in SEMAPHORES & TRANSACTIONS
+Deadlocks	                LATEST DETECTED DEADLOCK section
+Slow disk I/O	                FILE I/O shows many pending reads/writes
+Buffer cache too small	        BUFFER POOL shows lots of reads from disk
+Frequent writes but slow flush	LOG shows high log activity without progress
+
+9) Types of indexes
+Primary Key Index
+	Automatically created when you define a PRIMARY KEY on a table.
+Unique Index
+	Guarantees that all values in the indexed column(s) are unique (but can allow NULLs).
+Regular (Non-Unique) Index
+	Also called a normal index. Seeds up queries but doesn’t enforce uniqueness.
+Full-Text Index
+	Designed for full-text search in large text columns (like TEXT, VARCHAR).
+Spatial Index
+	Used for indexing spatial/geographic data types (like POINT, GEOMETRY).
+
+10) How to configure chain replication?
+Yes! You can configure chain replication in MySQL, where you have a master → intermediate (slave/relay) → downstream replicas setup. This is sometimes called chained replication or cascading replication — the intermediate server (or servers) not only replicates from its master but also writes the changes it receives into its own binary log so downstream replicas can follow it.
+
+To make this work:
+	Binary logging must be enabled on every server in the chain — because replication works by reading the binary log.
+	Intermediate replicas must have log_slave_updates enabled — so they write the events they receive from their upstream server into their own binary log.
+	Every server must have a unique server-id in my.cnf, otherwise replication won’t work.
+
+11) What is GTID replication?
+GTID (Global Transaction Identifier) replication is a replication method where every transaction gets a unique identifier that stays the same across all servers in the replication topology (master and replicas).
+What a GTID Is, A GTID is a globally unique identifier:
+It includes the server’s UUID (unique ID for the server) Plus a transaction sequence number
+For example:
+7d73b822-75e1-11ef-a4da-4455e16762b4:553 — this means transaction number 553 on the server with UUID 7d73b822-75e1-11ef-a4da-4455e16762b4.
+
+Key Benefits of GTID Replication:
+Easier Configuration
+	You don’t need to specify binary log file names and positions when starting replication — you can use auto-positioning instead (e.g., MASTER_AUTO_POSITION = 1).
+Simplified Failover
+	If a master goes down, a replica can be promoted to master more easily because every transaction has a unique, trackable identifier.
+Transaction Consistency
+	GTIDs make it easier to verify that all transactions on the source have also been applied to replicas, because you can compare GTID sets rather than log positions.
+
+12) Step to salve to master
+1️⃣ On the Slave You Want to Promote
+Before promoting, ensure the slave is fully caught up with the old master (i.e., no relay logs left to apply). You can check this with:
+	SHOW SLAVE STATUS\G
+Make sure: Seconds_Behind_Master is 0, Slave_SQL_Running and Slave_IO_Running are both Yes (if possible)
+(You want the most up-to-date data if the old master died.)
+a. Stop Replication
+	STOP SLAVE;
+b. Remove Replication Settings
+	RESET SLAVE;
+RESET SLAVE clears the replication configuration (e.g., master host, log position) on this server.
+c. Prepare It to Accept Writes (if necessary)
+If this server was previously configured as read-only (common for slaves), disable that:
+	SET GLOBAL read_only = OFF;
+	SET GLOBAL super_read_only = OFF;
+(This makes the promoted server accept updates.)
+
+d. Enable Binary Logging (if not already)
+Make sure the server is logging changes so it can act as a master:
+	SET GLOBAL binlog_format = 'ROW';
+(This is optional but recommended for consistency and replication reliability.)
+
+2️⃣ Reconfigure Other Slaves to Replicate from the New Master
+On any other replicas that were following the old master, you need to point them to this new master.
+For each replica:
+Stop its replication:
+	STOP SLAVE;
+Configure the new master:
+
+CHANGE MASTER TO
+  MASTER_HOST='new_master_host',
+  MASTER_USER='replication_user',
+  MASTER_PASSWORD='replication_password',
+  MASTER_AUTO_POSITION = 1;
+
+
+MASTER_HOST is the promoted slave’s host.
+Use MASTER_AUTO_POSITION = 1 if using GTID replication.
+Otherwise, specify MASTER_LOG_FILE and MASTER_LOG_POS manually if not using GTIDs.
+Start replication on the replica:
+START SLAVE;
+
+--in mysql 8.0
+
+Server A --> current primary
+Server B --> New primary when Server A goes off
+Server C
+
+Connect B:
+SHOW REPLICA STATUS\G
+
+| Field                   | Expected condition                              |
+| ----------------------- | ----------------------------------------------- |
+| `Replica_IO_Running`    | Yes                                             |
+| `Replica_SQL_Running`   | Yes                                             |
+| `Seconds_Behind_Source` | 0 (not a complete guarantee of synchronization) |
+| `Last_SQL_Error`        | Empty                                           |
+| `Retrieved_Gtid_Set`    | Review received transactions                    |
+| `Executed_Gtid_Set`     | Review executed transactions                    |
+
+**Important:** Ensure Server B has applied all transactions from Server A before promoting it to primary.
+
+Step 2: Stop replication on Server B
+STOP REPLICA;
+
+Check the executed GTID set:
+SELECT @@GLOBAL.gtid_executed;
+
+Also verify whether there are unapplied relay-log transactions before proceeding. Do not discard relay logs if they contain transactions that have not yet been applied.
+
+Step 3: Promote Server B
+Remove its old replication configuration:
+RESET REPLICA ALL;
+
+
+Enable read/write access:
+SET GLOBAL super_read_only = OFF;
+SET GLOBAL read_only = OFF;
+
+Step 4: Reconfigure Server C to replicate from Server B
+Connect to Server C.
+
+Stop its existing replication:
+STOP REPLICA;
+
+
+Change its source to Server B:
+CHANGE REPLICATION SOURCE TO
+    SOURCE_HOST = 'serverB',
+    SOURCE_PORT = 3306,
+    SOURCE_USER = 'repl_user',
+    SOURCE_PASSWORD = 'password',
+    SOURCE_AUTO_POSITION = 1;
+
+
+Start replication:
+START REPLICA;
+
+13) GTID vs. Non-GTID
+If you’re using GTID replication, failover is easier because slaves can auto-position and don’t need binary log file/position details when reconfiguring. Otherwise, you may need precise coordinates when doing CHANGE
+
+13.1) How to get Position and file number if GTID is not enabled?
+1. Get the current binary log position
+Execute on the source server:
+SHOW MASTER STATUS;
+
+
+Example output:
+File	Position	Binlog_Do_DB	Binlog_Ignore_DB
+mysql-bin.000025	15432		
+
+Here:
+- File: mysql-bin.000025
+- Position: 15432
+These two values identify the replication position.
+
+For newer MySQL versions, you can also use:
+SHOW BINARY LOG STATUS;
+
+14) Innodb vs NDB cluster?
+InnoDB Cluster
+ 	Group Replication (synchronous multi-master replication) + MySQL Router + MySQL Shell
+ 	All nodes run full InnoDB storage engine
+ 	Data is fully replicated on every node (up to 9 members recommended)
+ 	One (or all) nodes accept writes → conflict detection in multi-primary mode
+ 	MySQL Router handles load balancing and failover transparently
+
+NDB Cluster
+ 	True distributed database (shared-nothing)
+ 	Data is partitioned (sharded automatically by hash of primary key) across data nodes
+ 	SQL nodes (mysqld processes) are stateless and talk to data nodes via NDB API
+ 	Synchronous replication within each node group (usually 2–4 replicas per partition)
+ 	Can have dozens/hundreds of nodes (up to ~144 in recent versions)
+
+15) Partition table workflow summary
+	Define partition strategy in CREATE/ALTER table.
+	MySQL stores rows in partitions based on a partitioning function.
+	Insert — MySQL routes each row to the correct partition.
+	Query — MySQL prunes irrelevant partitions during search.
+	Updates/Deletes — similar pruning applied when possible.
+	Maintenance — partitions can be added, removed or reorganized independently.
+
+16) How partition works in NDB cluster
+In an NDB Cluster, every NDB table is automatically partitioned (sharded) across the cluster:
+	If you don’t specify a partition scheme, NDB automatically partitions the table using a hash on its primary key (or a hidden key if there’s no primary key).
+	This means rows are spread across all data nodes so that no single node holds the entire table.
+This is different from InnoDB partitioning (which happens in a single server). NDB’s partitioning is distributed across multiple machines for scalability.
+
+How Data Is Distributed:
+When data is written to a table:
+	Hashing is applied to the primary key (or user-defined key columns if you specify PARTITION BY KEY).
+	The hash determines which fragment (partition) the row belongs to.
+	That fragment’s data goes to the corresponding data node(s).
+	Each fragment is stored redundantly on different nodes (based on replica settings) so that if one node fails, the data is still available.
+This splitting happens under the hood — the client doesn’t need to know where a row lives.
+
+17) MySQL NDB vs Cassandra
+1. System Category & Data Model
+MySQL NDB Cluster:
+	A distributed relational database using the NDB storage engine under MySQL. It supports full SQL with joins, foreign keys, and ACID transactions.
+	Tables look like regular MySQL tables but are sharded and replicated across nodes behind the scenes.
+	Uses a shared-nothing distributed architecture with data nodes, management nodes, and SQL nodes.
+	Automatic partitioning (sharding) and synchronous replication of data across nodes within the cluster for high availability.
+	Can also do asynchronous replication to another cluster for geographical redundancy.
+
+Cassandra:
+	A NoSQL distributed database with a wide-column storage model (like Bigtable) and a SQL-like CQL.
+	Does not support JOINs or complex transactions like a relational system — queries are simpler and must be designed with access patterns in mind.
+	Uses a peer-to-peer distributed model where all nodes are equal and there’s no single point of failure.
+	Data is distributed using consistent hashing and replicated based on configurable replication factor and strategy.
+	Strong focus on horizontal scalability and availability at global scale.
+
+18) Limitations of NDB cluster?
+	NDB Cluster does not support many standard MySQL features that developers often expect:
+	No temporary tables — CREATE TEMPORARY TABLE … ENGINE=NDB fails.
+	No full-text indexes.
+	No index prefixes — only complete columns can be indexed.
+	No spatal indexes (although spatial columns can exist).
+	Some SQL syntax and behaviors differ from standard MySQL or other engines like InnoDB.
+	Supports only the READ COMMITTED isolation level — unlike InnoDB which supports higher levels such as REPEATABLE READ and SERIALIZABLE.
+
+18) How to achieve auto failover replication?
+MySQL provides several ways to achieve automatic replication failover, where the system detects a primary (master) failure and promotes a secondary (slave/replica) to take over without manual intervention. This is crucial for high availability (HA). The best approach depends on your replication type (asynchronous vs. synchronous) and MySQL version (focus on 8.0+ as of 2026).
+Key options:
+	Built-in: MySQL InnoDB Cluster (recommended for most users) – Uses Group Replication for synchronous multi-master setup with auto failover.
+	External tools for traditional async replication: Like Orchestrator or MHA for failover orchestration.
+	Proxy-based: MySQL Router or ProxySQL for client-side redirection (complements the above).
+
+Note: Traditional async replication (via CHANGE MASTER TO) doesn't have built-in auto failover; you need add-ons. For true HA, prefer synchronous options like Group Replication.
+1. Using MySQL InnoDB Cluster (Easiest & Built-in Auto Failover)
+InnoDB Cluster combines Group Replication (sync replication), MySQL Router (load balancing/failover), and MySQL Shell (management). It supports automatic failover in ~5-30 seconds.
+Prerequisites
+	MySQL 8.0+ (InnoDB storage engine).
+	At least 3 nodes (odd number for quorum; up to 9 recommended).
+	GTID enabled (gtid_mode=ON).
+	Binary logging enabled.
+
+19) Sync and async replication
+1. Asynchronous Replication (The Default)
+This is the oldest, fastest, and most common form of replication in standard MySQL.
+How it works
+	Client sends write: An application sends an INSERT, UPDATE, or DELETE to the Source (Primary) server.
+	Source commits: The source executes the transaction, writes it to its local binary log (binlog), and commits the change to its storage engine (InnoDB).
+	Client notified: The source immediately sends an acknowledgement ("Success!") back to the client application.
+	Replication happens later: In the background, independent of the client connection, the Replica (Secondary) server connects to the Source, requests new binlog events, downloads them, and applies them to its own data.
+2. Semi-Synchronous Replication (The Pragmatic Middle Ground)
+This is a plugin included with standard MySQL that offers a compromise between speed and safety. It is highly recommended for High Availability (HA) setups.
+How it works
+	Client sends write: The application sends a transaction to the Source.
+	Source prepares: The source writes the transaction to its binlog and prepares to commit to storage.
+	Source waits: Before acknowledging the commit to the client, the Source sends the logs to the replicas and waits.
+	Replica acknowledges: The Source waits until at least one replica acknowledges that it has received the log event and written it to its own relay log (it hasn't necessarily applied it yet, just safely received it on disk).
+	Source commits: Once that one acknowledgement is received, the Source commits locally and sends "Success!" to the client application.
+3. Synchronous Replication (e.g., Galera Cluster)
+True synchronous replication means a transaction is not considered committed until all nodes in the cluster have agreed to commit it. Standard MySQL replication cannot do this efficiently. This is usually the domain of Galera Cluster.
+How it works (Galera concept)
+	Client sends write: The application sends a transaction to any node in the cluster.
+	Certification: That node sends the write set to all other nodes in the cluster simultaneously.
+	Global Agreement: All nodes perform a "certification test" to ensure there are no conflicts.
+	Commit on All: If certification passes, all nodes commit the transaction virtually simultaneously.
+	Client notified: Only once all nodes have agreed and committed is success returned to the client.
+
+19.1) How writeset are applied in innodb group replication or Galera cluster
+
+Step-by-step process
+1. Application submits a transaction to Node 1.
+2. Node 1 executes the transaction locally and generates a writeset.
+3. The writeset is distributed through the group communication layer.
+4. Members establish a consistent transaction order.
+5. Certification checks whether the transaction conflicts with other transactions.
+6. If certification succeeds, the transaction can commit on the originator.
+7. Other members apply the writeset asynchronously through their applier processes.
+
+20) MySQL upgrade steps (using tarball)
+1) Prepare & Download
+	Choose the target MySQL version you want to upgrade to.
+	Download the correct binary tarball for your OS/architecture from the official MySQL site.
+
+2) Backup Everything
+Before touching anything:
+Stop the MySQL service:
+	sudo systemctl stop mysqld
+Backup your data directory (e.g., /var/lib/mysql) and important config files (like /etc/my.cnf).
+(Optional but recommended) do a logical dump:
+	mysqldump -u root -p --all-databases > all_databases.sql
+This ensures you can restore data if something goes wrong.
+
+3) Extract the New Tarball
+Unpack the downloaded tarball into your install directory (e.g., /usr/local/mysql-new):
+	cd /usr/local
+	tar -xvf /path/to/mysql-<VERSION>-linux.tar.xz
+This creates a new directory such as:
+	/usr/local/mysql-8.0.35-linux-glibc2.12-x86_64
+
+4) Replace the Old Installation
+Move or rename the existing MySQL install directory (e.g., /usr/local/mysql):
+	mv /usr/local/mysql /usr/local/mysql-old
+Create a symlink to the new version:
+	ln -s mysql-8.0.35-linux-glibc2.12-x86_64 mysql
+This keeps the mysql symbolic link pointing to the current version.
+Update paths (optional) If you use environment variables, adjust them:
+	export PATH=/usr/local/mysql/bin:$PATH
+Add to ~/.bashrc or your shell profile if necessary.
+
+5) Adjust Ownership
+Ensure MySQL files are owned by the proper user (usually mysql):
+	chown -R mysql:mysql /usr/local/mysql-8.0.35-linux-glibc2.12-x86_64
+	chown -R mysql:mysql /usr/local/MySQL
+
+6) Start the MySQL Server
+Start the new binaries using your current data directory:
+	/usr/local/mysql/bin/mysqld_safe --user=mysql --datadir=/path/to/your/datadir &
+Or use your init script/service if configured.
+
+7) Run Upgrade Tools
+Depending on the MySQL version you’re upgrading from/into: If upgrading older versions (<8.0.16): run the upgrade utility
+	mysql_upgrade -u root -p
+
+8) Restart and Verify
+Restart the server cleanly
+	mysqladmin -u root -p shutdown
+	/usr/local/mysql/bin/mysqld_safe --user=mysql &
+Check the version
+	SELECT VERSION();
+Verify databases and functionality
+
+21) How to enable incremental backup?
+There is NO built-in incremental backup
+	Option 1: MySQL Enterprise Backup (official)
+	Option 2: Percona XtraBackup (most common free tool)
+	Option 3: Using Binary Logs (logical incremental)
+		Take full backup (mysqldump)
+		Backup binlogs continuously
+
+22) Data Encryption?
+1️⃣ Encryption in Transit (TLS/SSL)
+MySQL supports TLS encryption between:
+	Application ↔ MySQL Server
+	MySQL ↔ Replica (Replication traffic)
+This prevents:
+	Man-in-the-middle attacks
+	Password sniffing
+	Packet capture of sensitive data
+Enabled using:
+	SHOW VARIABLES LIKE '%ssl%';
+Best practice:
+	require_secure_transport=ON
+
+
+2️⃣ Encryption at Rest
+🔹 Transparent Data Encryption (TDE)
+Available in:
+	MySQL Enterprise Edition
+	Community edition (via InnoDB tablespace encryption, limited)
+What can be encrypted:
+	InnoDB tablespaces
+	Redo logs
+	Undo logs
+	Temporary tables
+	Binary logs (8.0+)
+
+Uses:
+	AES encryption
+	Keyring plugin
+
+🔹 InnoDB Tablespace Encryption (MySQL 5.7+)
+You can encrypt individual tables:
+	ALTER TABLE employees ENCRYPTION='Y';
+Or enable default encryption:
+	innodb_encrypt_tables=ON
+
+3️⃣ Binary Log & Redo Log Encryption (MySQL 8.0+)
+To encrypt binary logs:
+	binlog_encryption=ON
+To encrypt redo logs:
+	innodb_redo_log_encrypt=ON
+Important for:
+	Replication security
+	Backup protection
+	Point-in-time recovery safety
+
+5️⃣ Disk-Level Encryption (Alternative)
+If using Community edition:
+You can enable:
+	LUKS (Linux)
+	BitLocker (Windows)
+	Cloud disk encryption (AWS EBS, Azure Disk Encryption)
+Protects:
+	Entire MySQL data directory
+	Logs
+	Backups
+
+23) Binary log vs redo log vs undo log?
+
+1️⃣ 🔴 Redo Log (Crash Recovery Log)
+📌 Purpose:
+Ensures durability (the “D” in ACID).
+📌 What it stores:
+	Physical changes made to data pages (before they are flushed to disk).
+Example:
+If you update a row:
+	UPDATE users SET salary = 50000 WHERE id = 1;
+The change is first written to the redo log, then later flushed to the actual data file.
+📌 Why it exists:
+If MySQL crashes: Redo log is replayed
+	Unflushed committed transactions are recovered
+📌 Characteristics:
+	Stored in ib_logfile*
+	Circular file
+	Sequential writes (very fast)
+	Used only for crash recovery
+	Not used for replication
+📌 Controlled by:
+innodb_log_file_size
+innodb_redo_log_encrypt
+
+2️⃣ 🔵 Undo Log (Rollback & MVCC Log)
+📌 Purpose:
+Supports:
+	Transaction rollback
+	MVCC (Multi-Version Concurrency Control)
+	Consistent reads
+📌 What it stores:
+	Before-image of data (previous values).
+	If you update salary from 40k → 50k:
+	Undo log stores 40k
+📌 Why it exists:
+	If transaction rolls back → restore old value
+	If another transaction is reading old snapshot → use undo log
+📌 Characteristics:
+	Stored in undo tablespaces
+	Linked to transaction IDs
+	Cleaned up after transaction commits and no longer needed
+📌 Controlled by:
+	innodb_undo_tablespaces
+	innodb_undo_log_truncate
+
+3️⃣ 🟢 Binary Log (Replication & PITR Log)
+📌 Purpose:
+Used for:
+	Replication
+	Point-in-Time Recovery (PITR)
+📌 What it stores:
+	Logical changes (SQL statements or row changes).
+If you update salary:
+	Binlog stores the SQL statement or row-level change
+📌 Why it exists:
+	Replicas read binary log from primary
+	Used to replay changes during recovery
+📌 Characteristics:
+	Stored as mysql-bin.000001
+Sequential
+	Can be statement-based, row-based, or mixed
+📌 Controlled by:
+	log_bin=ON
+	binlog_format=ROW
+	binlog_encryption=ON
+🔄 How They Work Together (Transaction Flow)
+When a transaction commits:
+	Write to Undo Log
+	Write to Redo Log
+	Write to Binary Log
+	Commit acknowledged to client
+
+24) MySQL InnoDB Cluster vs Galera Cluster
+
+Both MySQL InnoDB Cluster and Galera Cluster provide high availability (HA), synchronous replication, and automatic failover capabilities for MySQL-compatible databases.
+
+However, they differ significantly in architecture, replication mechanisms, failover management, and operational flexibility.
+
+The biggest distinction is:
+- InnoDB Cluster: MySQL's native HA solution, built around Group Replication, MySQL Shell, and MySQL Router.
+- Galera Cluster: A virtually synchronous multi-primary clustering solution, commonly used with MariaDB and Percona XtraDB Cluster.
+
+| **Feature**                | **InnoDB Cluster**                                | **Galera Cluster**                                               |
+| -------------------------- | ------------------------------------------------- | ---------------------------------------------------------------- |
+| Replication technology     | Group Replication                                 | Galera replication                                               |
+| Replication type           | Virtually synchronous                             | Virtually synchronous                                            |
+| Architecture               | Single-primary or multi-primary                   | Multi-primary                                                    |
+| Write operations           | Normally one primary                              | All nodes can accept writes                                      |
+| Read operations            | All nodes                                         | All nodes                                                        |
+| Automatic failover         | Yes                                               | Yes, with appropriate management                                 |
+| Conflict detection         | Group Replication certification                   | Galera certification                                             |
+| Routing                    | MySQL Router                                      | HAProxy / ProxySQL / MaxScale                                    |
+| Cluster management         | MySQL Shell                                       | Provider-specific tools                                          |
+| Storage engine             | InnoDB                                            | InnoDB / XtraDB                                                  |
+| Node addition              | MySQL Shell AdminAPI                              | State Snapshot Transfer (SST) / Incremental State Transfer (IST) |
+| Network partition handling | Group membership and quorum                       | Primary component and quorum                                     |
+| Geographic distribution    | Supported, latency-sensitive                      | Supported, latency-sensitive                                     |
+| Node recovery              | Clone or incremental recovery                     | IST or SST                                                       |
+| Quorum                     | Majority voting                                   | Majority voting                                                  |
+| Write scaling              | Primarily single-primary; multi-primary supported | Multi-primary writes supported                                   |
+| Read scaling               | Yes                                               | Yes                                                              |
+| Flow control               | Group Replication flow control                    | Galera flow control                                              |
+| Application connectivity   | MySQL Router                                      | ProxySQL / HAProxy / MaxScale                                    |
+| Backup solutions           | MySQL Enterprise Backup / Percona XtraBackup      | MariaDB Backup / Percona XtraBackup                              |
+| Primary election           | Automatic in single-primary mode                  | No permanent primary; primary component manages membership       |
+| Minimum recommended nodes  | 3                                                 | 3                                                                |
+| DR capability              | Requires additional DR planning                   | Requires additional DR planning                                  |
+
+
+Performance and operational considerations
+
+
+| **Area**             | **InnoDB Cluster**                           | **Galera Cluster**                             |
+| -------------------- | -------------------------------------------- | ---------------------------------------------- |
+| Write-heavy workload | Better suited to centralized writes          | Can suffer from certification conflicts        |
+| Read-heavy workload  | Reads distributed to secondary nodes         | Reads distributed across all nodes             |
+| Concurrent writes    | Usually centralized on the primary           | Writes can originate on all nodes              |
+| Long transactions    | Can affect replication and group performance | Can cause certification and replication issues |
+| Large transactions   | Can increase replication overhead            | Large writesets can affect cluster performance |
+| WAN latency          | Impacts Group Replication performance        | Can significantly impact commit latency        |
+| Maintenance          | Managed through MySQL Shell                  | Requires Galera-aware maintenance procedures   |
+
+Which one to choose
+
+| **Requirement**                         | **Recommendation** |
+| --------------------------------------- | ------------------ |
+| Pure MySQL environment                  | InnoDB Cluster     |
+| MariaDB environment                     | Galera Cluster     |
+| Single-primary architecture             | InnoDB Cluster     |
+| Active-active multi-primary writes      | Galera Cluster     |
+| Native MySQL ecosystem                  | InnoDB Cluster     |
+| MariaDB HA and read scaling             | Galera Cluster     |
+| Simplified MySQL cluster administration | InnoDB Cluster     |
+
+
+ailover scenario comparison
+Assuming a three-node cluster:
+
+| **Failure scenario**        | **InnoDB Cluster**                                               | **Galera Cluster**                                       |
+| --------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| Node 1 fails                | Cluster continues; new primary elected if Node 1 was the primary | Remaining two nodes continue                             |
+| Node 2 fails                | Cluster continues                                                | Cluster continues                                        |
+| Two nodes fail              | Quorum lost                                                      | Quorum lost                                              |
+| Network partition (2 vs. 1) | Majority partition survives                                      | Majority partition survives                              |
+| Failed node comes back      | Rejoin using clone or incremental recovery                       | Rejoin using IST or SST                                  |
+| Application reconnection    | MySQL Router routes connections to the new primary               | ProxySQL / HAProxy routes connections to available nodes |
+
+Important monitoring parameters
+
+| **Monitoring requirement** | **InnoDB Cluster**                             | **Galera Cluster**                         |
+| -------------------------- | ---------------------------------------------- | ------------------------------------------ |
+| Cluster status             | `cluster.status()`                             | `wsrep_cluster_status`                     |
+| Cluster size               | `performance_schema.replication_group_members` | `wsrep_cluster_size`                       |
+| Node readiness             | `MEMBER_STATE`                                 | `wsrep_ready`                              |
+| Node state                 | `MEMBER_STATE`                                 | `wsrep_local_state_comment`                |
+| Primary identification     | `MEMBER_ROLE`                                  | No permanent primary in multi-primary mode |
+| Replication health         | Group Replication status                       | `wsrep_connected`, `wsrep_ready`           |
+| Flow control               | Group Replication flow-control metrics         | `wsrep_flow_control_paused`                |
+| Certification conflicts    | Group Replication conflict statistics          | `wsrep_local_cert_failures`                |
+
+
+Solution: InnoDB Cluster
+Advantages: Native MySQL solution; integrated management; automatic primary election; MySQL Router integration; good single-primary architecture.
+Disadvantages: Requires MySQL Shell and Router; single-primary write bottleneck by default; multi-primary mode has limitations.
+
+Solution: Galera Cluster
+Advantages: Multi-primary writes; virtually synchronous replication; automatic membership management; supports MariaDB and Percona; flexible routing options.
+Disadvantages: Write conflicts; flow-control overhead; WAN latency sensitivity; SST can be resource-intensive; requires external routing.
+
+
+
+25) What is ist / sst in failed node come back in galena
+
+	In a Galera Cluster, IST and SST are two mechanisms used to synchronize a node when it joins or rejoins the cluster.
+
+The main difference is:
+- IST (Incremental State Transfer): Transfers only the missing transactions (write-sets) from another cluster node.
+- SST (State Snapshot Transfer): Transfers a complete database snapshot from another cluster node.
+
+| **Feature**          | **IST**                                            | **SST**                                    |
+| -------------------- | -------------------------------------------------- | ------------------------------------------ |
+| Full form            | Incremental State Transfer                         | State Snapshot Transfer                    |
+| Purpose              | Synchronize missing transactions                   | Synchronize the complete database          |
+| Data transferred     | Only missing write-sets                            | Entire database state                      |
+| Transfer size        | Usually smaller                                    | Usually much larger                        |
+| Speed                | Generally faster                                   | Generally slower                           |
+| Resource utilization | Lower                                              | Higher CPU, disk and network usage         |
+| Donor node impact    | Generally low                                      | Can be significant, depending on method    |
+| Downtime             | Usually minimal                                    | Depends on SST method and workload         |
+| Requirement          | Required transactions must exist in donor's GCache | Full snapshot must be available from donor |
+| Common method        | GCache-based transfer                              | `mariabackup`, `xtrabackup-v2`, `rsync`    |
+
+25.1) Failed node joint backup for innodb cluster?
+
+In MySQL InnoDB Cluster, when a failed node comes back online, it needs to synchronize with the current primary before it can rejoin the cluster.
+
+MySQL Group Replication supports two recovery methods:
+- Incremental Recovery: Transfers only the missing transactions using the binary log of another cluster member.
+- Clone Recovery: Transfers a complete physical snapshot of the database from another cluster member.
+
+| **Feature**          | **Incremental Recovery**                                       | **Clone Recovery**                                       |
+| -------------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
+| Purpose              | Synchronize missing transactions                               | Synchronize the complete database                        |
+| Data transferred     | Only missing transactions                                      | Complete database snapshot                               |
+| Transfer size        | Usually smaller                                                | Usually larger                                           |
+| Speed                | Generally faster                                               | Depends on database size and network                     |
+| Resource utilization | Generally lower                                                | Higher CPU, disk and network usage                       |
+| Recovery requirement | Required transactions must be available in donor's binary logs | Compatible donor instance must be available              |
+| Recovery method      | Distributed Recovery using binary logs                         | MySQL Clone Plugin                                       |
+| Donor impact         | Generally lower                                                | Can be significant                                       |
+| Node downtime        | Usually minimal                                                | Depends on database size and cloning process             |
+| Automatic recovery   | Supported                                                      | Supported when configured and selected by recovery logic |
+
+26) what is WSREP
+
+WSREP (Write Set Replication) is the replication API/protocol used by Galera to manage synchronous replication between cluster nodes.
+It enables multiple MariaDB or Percona nodes to exchange transaction write-sets and maintain consistent database state.
+
+When an application executes an UPDATE on Node 1:
+1. Transaction executes locally.
+2. WSREP captures the transaction write-set.
+3. Write-set is replicated to other nodes.
+4. Galera performs transaction ordering and certification.
+5. If certification succeeds, the transaction commits consistently across the cluster.
+6. If certification fails, the conflicting transaction is rolled back.
+
+27 what is gcache?
+GCache (Galera Cache) is a write-set cache maintained by each Galera Cluster node. It stores recently replicated transactions so that a node that goes offline and later rejoins can receive only the missing transactions through IST (Incremental State Transfer) instead of requiring a full database copy through SST.
+
+Think of GCache as a temporary transaction history buffer.
+
+28) does Galera cluster need binary log?
+No. Galera Cluster does not require binary logging for its internal cluster replication. Galera uses WSREP and the Galera Provider to replicate transactions between cluster nodes.
+
+29) Master salve vs group replication
+	Master-Slave Replication: One primary accepts writes and replicates changes to one or more replicas.
+Group Replication: Multiple MySQL servers work together as a group, coordinate transactions, and maintain a consistent dataset. It supports single-primary and multi-primary modes.
+
+A. Traditional Master-Slave Replication
+	Application sends INSERT, UPDATE and DELETE to the primary.
+	Primary records changes in its binary log.
+	Replica IO thread reads events from the primary.
+	Events are stored in the replica's relay log.
+	Replica SQL/applier thread executes the events.
+
+B. MySQL Group Replication
+	Multiple MySQL instances join a replication group.
+	Transactions are coordinated using group communication.
+	Members exchange transaction information and agree on transaction ordering.
+A 	transaction is certified before being applied.
+	Group membership and failure detection are managed automatically.
+	Supports single-primary and multi-primary configurations.
+	Replicas can serve read queries.
+
+29.1) Role of primary key in group replication?
+In MySQL Group Replication, primary keys are extremely important for writeset generation and conflict detection.
+
+If a table does not have a primary key, MySQL needs another way to identify the rows modified by a transaction.
+1. What happens when there is no primary key?
+Group Replication uses the following identification hierarchy:
+1. Primary key, if available.
+2. Suitable non-null unique key, if available.
+3. If neither exists, the table cannot be reliably identified for writeset-based certification.
+For Group Replication, tables should have a primary key or an appropriate non-null unique key.
+
+## **Primary-Replica vs Group Replication**
+
+| Feature                | Traditional Replication                                                        | Group Replication                                       |
+| ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Primary key mandatory  | No                                                                             | Yes, by default                                         |
+| Unique key alternative | Not mandatory                                                                  | Suitable non-null unique key can be used                |
+| Writeset certification | No                                                                             | Yes                                                     |
+| Conflict detection     | No group certification                                                         | Yes, through transaction certification                  |
+| Replication without PK | Supported                                                                      | Restricted by default                                   |
+| Replication mechanism  | Binary log and relay log                                                       | Group communication and writeset certification          |
+| Replication mode       | Asynchronous / semi-synchronous                                                | Group coordination                                      |
+| Automatic failover     | Requires external tooling or manual intervention                               | Supported through group membership and primary election |
+| Multi-primary support  | No native multi-primary                                                        | Yes                                                     |
+| Quorum mechanism       | No                                                                             | Yes                                                     |
+| GTID requirement       | Optional                                                                       | Required                                                |
+| Binary logging         | Required on source; replicas also need it for chained replication or promotion | Required on every member                                |
+| Read scaling           | Supported through replicas                                                     | Supported through secondary members                     |
+| Complexity             | Relatively simple                                                              | More complex                                            |
+
+**Note:** Group Replication can use a suitable non-null unique key as an alternative to a primary key. The `sql_require_primary_key` setting and `group_replication_enforce_update_everywhere_checks` are separate settings; the latter does not enforce primary keys.
+
+30) Does Galera cluster uses group replication
+No. Galera Cluster does not use MySQL Group Replication. They are two different clustering and replication technologies.
+
+## **Galera Cluster vs MySQL Group Replication**
+
+| Feature                | Galera Cluster                              | MySQL Group Replication                                   |
+| ---------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| Replication technology | Galera replication provider                 | MySQL Group Replication plugin                            |
+| Replication API        | wsrep API                                   | Group Replication plugin                                  |
+| Certification          | Writeset-based certification                | Writeset-based certification                              |
+| Communication          | Galera group communication                  | MySQL Group Communication (XCom or supported alternative) |
+| Replication approach   | Virtually synchronous                       | Group-based virtually synchronous replication             |
+| Multi-primary          | Yes                                         | Yes                                                       |
+| Single-primary         | Supported through configuration             | Supported natively                                        |
+| Binary log             | Not mandatory for Galera replication itself | Mandatory                                                 |
+| GTID                   | Not mandatory for Galera replication itself | Mandatory                                                 |
+| Recovery               | IST / SST                                   | Incremental / Clone recovery                              |
+| Quorum                 | Yes                                         | Yes                                                       |
+
+31) Data write process?
+
+Step 1: Application sends the query
+The application connects to MySQL and sends the SQL statement.
+
+MySQL Server Layer:
+- Receives the SQL statement.
+- Parses and validates the syntax.
+- Checks permissions.
+- Generates an execution plan.
+- Identifies the records that need modification.
+
+Step 2: InnoDB locates the data
+InnoDB uses the primary key index to locate the corresponding record.
+- First, it checks whether the required data page is available in the InnoDB Buffer Pool.
+- If available, it reads from memory.
+
+Step 3: Undo log is generated
+Before modifying the existing record, InnoDB generates undo information.
+
+For example:
+Column	Old value	New value
+employee_id	101	101
+salary	60000	75000
+
+Undo log stores the previous value (60000) so InnoDB can:
+- Roll back the transaction.
+- Provide consistent reads to other transactions through MVCC.
+Step 4: Data page is modified in Buffer Pool
+InnoDB updates the salary from 60000 to 75000 in the in-memory data page.
+
+This page becomes a dirty page because the modified version has not necessarily been written to the data file on disk.
+- If not available, it reads the required page from disk into the Buffer Pool.
+
+Step 5: Redo log is generated
+InnoDB generates redo log records describing the changes.
+
+The redo log is essential for crash recovery.
+
+For example, if the MySQL server crashes after the transaction commits but before the modified data page is written to disk, InnoDB can use redo logs to recover the committed change.
+
+Step 6: Binary log is generated
+If binary logging is enabled, MySQL records the transaction in the binary log.
+
+The binary log is important for:
+- Primary-Replica replication.
+- Point-in-time recovery (PITR).
+- Group Replication.
+- Tracking transactions using GTIDs.
+Remember the distinction:
+- Redo log belongs to InnoDB and supports crash recovery.
+- Binary log belongs to the MySQL Server layer and supports replication and recovery.
+
+Step 7: Transaction commit (Two-Phase Commit)
+This is one of the most important parts of MySQL's write process.
+
+When binary logging is enabled, MySQL coordinates InnoDB and the binary log using a two-phase commit protocol.
+
+What happens if MySQL crashes?
+Consider three scenarios:
+
+Crash scenario	What happens during recovery
+Before commit -->	Uncommitted transaction is rolled back using undo information
+After commit, before data page flush -->	Redo log reapplies committed changes
+During data page write -->	Doublewrite mechanism helps recover torn pages; redo recovery follows
+
+32) Data read process?
+
+Step 1: Application sends the query
+Step 2: Query optimizer selects an access path
+	For example, because employee_id is a primary key, the optimizer can choose a primary key index lookup.
+Step 3: InnoDB checks the Buffer Pool
+This is one of the most important steps.
+	InnoDB checks whether the required index/data page is already available in the Buffer Pool.
+Step 4: If the page is not in Buffer Pool
+InnoDB reads the required page from the database data file and loads it into the Buffer Pool.
+
+For example:
+- Primary key index page.
+- Relevant leaf page containing the employee record.
+Once the page is loaded, InnoDB can retrieve the requested record from memory.
+
+33) Types of isolation?
+A. READ UNCOMMITTED
+This is the lowest isolation level.
+A transaction can read changes made by another transaction even if those changes have not been committed.
+
+B. READ COMMITTED
+A transaction can read only committed data.
+
+C. REPEATABLE READ
+This is the default isolation level in MySQL InnoDB.
+Once a transaction establishes its consistent read snapshot, subsequent consistent reads within that transaction see the same snapshot.
+This is achieved using MVCC (Multi-Version Concurrency Control) and Undo Logs.
+
+D. SERIALIZABLE
+This is the strictest isolation level.
+Transactions behave as though they are executed serially rather than concurrently.
+InnoDB uses additional locking for ordinary SELECT statements, effectively treating them as locking reads.
+
+34) MySQL MVCC vs SQL Server Snapshot Isolation
+
+| Feature                         | MySQL InnoDB                             | SQL Server                                                                      |
+| ------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
+| Technology                      | MVCC                                     | Row versioning                                                                  |
+| Previous row versions stored in | Undo tablespace (undo logs)              | TempDB version store, or Persistent Version Store (ADR)                         |
+| Version identification          | Transaction ID and roll pointer          | Transaction sequence information                                                |
+| Read consistency                | Read View                                | Transaction snapshot                                                            |
+| READ COMMITTED                  | New Read View for each consistent SELECT | Requires `READ_COMMITTED_SNAPSHOT ON` for statement-level versioned reads       |
+| REPEATABLE READ                 | Reuses transaction Read View             | Requires `ALLOW_SNAPSHOT_ISOLATION ON` for transaction-level snapshot isolation |
+| Cleanup                         | InnoDB purge process                     | Version store cleanup                                                           |
+| Readers block writers?          | Normally no                              | Normally no with row versioning enabled                                         |
+
+
+35) Group replication configuration
+Requirements:
+- MySQL 8.0 or 8.4 with the Group Replication plugin available.
+- All nodes should use compatible MySQL versions.
+- Unique server_id for each node.
+- Binary logging enabled.
+- GTID enabled.
+- Network connectivity between all members.
+- Consistent initial data across the members.
+- Open the required MySQL and group communication ports between nodes.
+
+Common configuration – all nodes
+
+[mysqld]
+
+# Binary logging and GTID
+server_id=1
+log_bin=mysql-bin
+binlog_format=ROW
+binlog_checksum=NONE
+
+gtid_mode=ON
+enforce_gtid_consistency=ON
+log_replica_updates=ON
+
+# Group Replication
+plugin_load_add=group_replication.so
+group_replication_group_name="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+group_replication_start_on_boot=OFF
+
+group_replication_single_primary_mode=ON
+group_replication_enforce_update_everywhere_checks=OFF
+
+group_replication_local_address="10.0.0.11:33061"
+group_replication_group_seeds="10.0.0.11:33061,10.0.0.12:33061,10.0.0.13:33061"
+
+group_replication_ip_allowlist="10.0.0.0/24"
+
+Node-specific settings
+Setting	Node 1	Node 2	Node 3
+server_id	1	2	3
+group_replication_local_address	10.0.0.11:33061	10.0.0.12:33061	10.0.0.13:33061
+
+The group_replication_group_name must be the same on all nodes. Generate a UUID for your actual cluster rather than reusing this example.
+
+Other important settings:
+- gtid_mode=ON: Enables GTID-based transaction tracking.
+- enforce_gtid_consistency=ON: Enforces GTID-compatible transactions.
+- log_replica_updates=ON: Writes replicated transactions to the member's binary log.
+- binlog_format=ROW: Required for Group Replication.
+- binlog_checksum=NONE: Required for Group Replication.
+- group_replication_local_address: Address used for group communication, not the normal MySQL client port.
+- group_replication_group_seeds: Addresses of the group members that a joining node can contact.
+Restart MySQL on all three nodes after changing the configuration.
+
+4. Create a recovery user
+Group Replication uses a separate recovery channel to transfer missing transactions to a joining member.
+
+Create a user on the initial node:
+
+Configure the recovery credentials on all three nodes:
+CHANGE REPLICATION SOURCE TO
+    SOURCE_USER = 'repl_user',
+    SOURCE_PASSWORD = 'StrongPassword'
+FOR CHANNEL 'group_replication_recovery';
+
+5. Bootstrap the first node
+This is an important step.
+
+You must bootstrap the group on exactly one node when creating it for the first time.
+
+Connect to Node 1:
+SET GLOBAL group_replication_bootstrap_group = ON;
+
+START GROUP_REPLICATION;
+
+SET GLOBAL group_replication_bootstrap_group = OFF;
+
+
+Node 1 now creates the initial Group Replication membership.
+Initial group created
+6. Add Node 2 and Node 3
+Connect to Node 2:
+START GROUP_REPLICATION;
+
+37) Steps to configure innodb cluster
+
+38) What is AdminAPI?
+
+AdminAPI (Administration API) is a set of built-in administration functions provided by MySQL Shell to deploy, configure, manage, and monitor MySQL InnoDB Cluster.
+
+Instead of manually configuring Group Replication on every MySQL instance, you can use AdminAPI commands to automate most cluster administration activities.
+
+In simple terms:
+- Group Replication: Handles replication between MySQL nodes.
+- AdminAPI: Handles cluster configuration and administration.
+- MySQL Router: Handles application connection routing and failover.
+
+
+39) InnoDB vs Galera cluster
+
+## **1. Feature comparison**
+
+| Feature                   | InnoDB Cluster                                            | Galera Cluster                                                 |
+| ------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| Database engine           | MySQL InnoDB                                              | MySQL InnoDB                                                   |
+| Replication technology    | MySQL Group Replication                                   | Galera Replication                                             |
+| Replication API           | Group Replication plugin                                  | wsrep API                                                      |
+| Communication             | MySQL Group Communication (XCom or supported alternative) | Galera group communication                                     |
+| Replication method        | Virtually synchronous                                     | Virtually synchronous                                          |
+| Write replication         | Write-set certification                                   | Write-set certification                                        |
+| Write mode                | Single-primary or multi-primary                           | Multi-primary                                                  |
+| Default mode              | Single-primary                                            | Multi-primary                                                  |
+| Primary node              | One primary in single-primary mode                        | No permanent primary                                           |
+| Writes                    | Normally directed to primary in single-primary mode       | Can be accepted on any node                                    |
+| Reads                     | From primary or secondary nodes                           | From any node                                                  |
+| Conflict detection        | Certification-based                                       | Certification-based                                            |
+| Conflict resolution       | Transaction certification                                 | Transaction certification                                      |
+| Automatic failover        | Yes, in single-primary mode                               | Yes, through cluster membership and primary-component handling |
+| Node recovery             | Incremental recovery or Clone recovery                    | IST or SST                                                     |
+| Cluster management        | MySQL Shell AdminAPI                                      | Galera provider and management tools                           |
+| Routing                   | MySQL Router                                              | HAProxy, ProxySQL, or MaxScale                                 |
+| Minimum recommended nodes | 3                                                         | 3                                                              |
+| Quorum                    | Majority of voting members                                | Primary component with quorum                                  |
+| Binary logging            | Required for Group Replication                            | Not required by Galera itself                                  |
+| GTID                      | Required for Group Replication                            | Optional for Galera replication itself                         |
+| Typical use               | MySQL-native HA architecture                              | Multi-primary HA architecture                                  |
+
+## **2. Key differences to remember**
+
+| Area                       | InnoDB Cluster                    | Galera Cluster                   |
+| -------------------------- | --------------------------------- | -------------------------------- |
+| Technology                 | MySQL native                      | Third-party replication provider |
+| Default write architecture | Single-primary                    | Multi-primary                    |
+| Write handling             | Primary handles writes by default | Any node can accept writes       |
+| Recovery                   | Incremental recovery / Clone      | IST / SST                        |
+| Management                 | MySQL Shell AdminAPI              | Provider-specific tools          |
+| Routing solution           | MySQL Router                      | ProxySQL / HAProxy / MaxScale    |
+| Replication dependency     | Group Replication                 | wsrep API                        |
+
+**Interview tip:** The most important distinction is that InnoDB Cluster uses MySQL Group Replication, whereas Galera uses the wsrep API and Galera replication provider. Both use certification-based conflict detection and virtually synchronous replication, but their cluster management and default write architectures differ.
+
+40) Innodb cluster configuration
+
+1. Installation and prerequisites
+Install the following components:
+- MySQL Server on all three nodes.
+- MySQL Shell for cluster administration.
+- MySQL Router for application connectivity.
+
+2. Configure MySQL instances
+Configure all three MySQL instances with the required Group Replication settings.
+
+Important configurations:
+- Unique server_id for each instance.
+- Enable GTID.
+- Enable binary logging.
+- Configure binlog_format=ROW.
+- Configure enforce_gtid_consistency=ON.
+- Configure log_replica_updates=ON.
+- Configure Group Replication communication ports.
+- Ensure network connectivity between all nodes.
+
+Use MySQL Shell AdminAPI to validate instance configuration.
+
+3. Configure network and firewall
+Allow communication between all cluster members.
+
+Common ports:
+Port	Purpose
+3306	MySQL classic protocol
+33060	MySQL X Protocol
+33061	Group Replication communication (default XCom port)
+
+Also allow application connectivity to MySQL Router.
+
+4. Configure administrative accounts
+Create the required cluster administration account and grant the necessary privileges.
+
+Use the same credentials consistently across cluster administration operations.
+5. Validate MySQL instances
+Connect through MySQL Shell:
+mysqlsh root@mysql01:3306
+
+
+Run:
+dba.checkInstanceConfiguration('root@mysql01:3306')
+
+
+Repeat the validation for the other two instances.
+6. Create the InnoDB Cluster
+Connect to the initial primary using MySQL Shell and create the cluster.
+var cluster = dba.createCluster('ProductionCluster')
+
+This initializes Group Replication and creates cluster metadata.
+
+7. Add secondary instances
+Add the remaining MySQL instances:
+cluster.addInstance('root@mysql02:3306')
+
+cluster.addInstance('root@mysql03:3306')
+
+Choose the appropriate recovery method:
+- Clone: Copies the complete database from an existing cluster member.
+- Incremental: Transfers missing transactions using GTID-based recovery.
+
+8. Verify cluster status
+Run:
+cluster.status()
+
+
+41) mysql vs mysqlsh command line
+
+## **MySQL vs MySQL Shell (mysqlsh) – Feature Comparison**
+
+| Feature                      | mysql                                 | mysqlsh                                        |
+| ---------------------------- | ------------------------------------- | ---------------------------------------------- |
+| Full name                    | MySQL Client                          | MySQL Shell                                    |
+| Purpose                      | SQL execution and administration      | Advanced MySQL administration and development  |
+| Interface                    | Command-line client                   | Advanced interactive shell                     |
+| SQL support                  | Yes                                   | Yes                                            |
+| JavaScript support           | No                                    | Yes                                            |
+| Python support               | No                                    | Yes                                            |
+| SQL mode                     | Default                               | `\sql`                                         |
+| JavaScript mode              | Not supported                         | `\js`                                          |
+| Python mode                  | Not supported                         | `\py`                                          |
+| InnoDB Cluster management    | No native AdminAPI                    | Yes                                            |
+| Group Replication management | Through SQL commands                  | Through AdminAPI and SQL                       |
+| Cluster creation             | No                                    | Yes                                            |
+| Cluster status               | SQL queries                           | `cluster.status()`                             |
+| Cluster recovery             | Manual SQL administration             | AdminAPI                                       |
+| Import/export                | Basic dump utilities (external tools) | Advanced dump and load utilities               |
+| X DevAPI                     | No                                    | Yes                                            |
+| JSON support                 | SQL-based                             | SQL and JavaScript/Python APIs                 |
+| Typical use                  | Day-to-day DBA operations             | Cluster management and advanced administration |
+
+
+42) Binary log format
+
+43) port 33060 and 33061 for innodb cluster
+
+44) Galera cluster configuration
+
+Setting up a **Galera Cluster** (for MariaDB, MySQL, or Percona XtraDB) establishes a synchronous, multi-master replication topology where all nodes can accept reads and writes simultaneously.
+
+### 1. Infrastructure & Prerequisites
+
+* **Minimum 3 Nodes:** Deploy at least three Linux servers (bare-metal or VMs) to establish a proper quorum and prevent **split-brain** scenarios. (If using 2 nodes, deploy a lightweight `garbd` Galera Arbitrator on a third host).
+* **Clock Synchronization:** Enable NTP/Chrony across all nodes so timestamps stay aligned.
+* **Storage Engine Check:** Ensure your tables use **InnoDB** (Galera does not reliably replicate MyISAM DML by default).
+
+### 2. Software Installation (On All Nodes)
+
+* Install the database server package (e.g., `mariadb-server` or `percona-xtradb-cluster`) along with the **Galera wsrep provider library** (`galera-4` or `libgalera_smm.so`).
+* Install a State Snapshot Transfer (SST) utility such as **`rsync`** or **`mariabackup` / `xtrabackup**` (preferred for zero-downtime non-blocking transfers on large datasets).
+* Run `mariadb-secure-installation` (or `mysql_secure_installation`) on each node to lock down root access.
+
+### 3. Network & Firewall Configuration (On All Nodes)
+
+Open the four ports required for client traffic, cluster consensus, and data transfers:
+
+| Port / Protocol | Purpose |
+| --- | --- |
+| **3306 / TCP** | Standard client database connections |
+| **4567 / TCP & UDP** | Galera replication traffic and cluster membership (multicast/unicast) |
+| **4568 / TCP** | Incremental State Transfers (IST) for catching up brief disconnects |
+| **4444 / TCP** | Full State Snapshot Transfers (SST) for newly joining nodes |
+
+*(Note: If SELinux or AppArmor is enforcing, configure policies to allow database access to these ports and SST tools.)*
+
+### 4. Cluster Configuration (`galera.cnf` on All Nodes)
+
+Stop the database service on all nodes, then create a Galera configuration block (e.g., `/etc/mysql/conf.d/galera.cnf` or `/etc/my.cnf.d/galera.cnf`) with these core parameters:
+
+* **InnoDB & Binlog Requirements:**
+```ini
+binlog_format=ROW
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+
+```
+
+
+* **Cluster-Wide Settings (Identical on all nodes):**
+```ini
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+wsrep_cluster_name="prod_galera_cluster"
+wsrep_cluster_address="gcomm://10.0.0.1,10.0.0.2,10.0.0.3"
+wsrep_sst_method=mariabackup
+
+```
+
+
+* **Node-Specific Settings (Unique per node):**
+```ini
+wsrep_node_name="db-node-1"
+wsrep_node_address="10.0.0.1"
+
+```
+
+
+
+### 5. Bootstrap the First Node
+
+Because no cluster exists yet, starting the service normally will fail as it searches for peers.
+
+1. Pick **Node 1** (or the node with the most recent data if migrating) and initialize the cluster:
+```bash
+sudo galera_new_cluster
+# Or on some distros: sudo systemctl start mariadb@bootstrap.service
+
+```
+
+
+2. Verify `wsrep_cluster_size` is `1` and `wsrep_cluster_status` is `Primary`.
+
+### 6. Join Remaining Nodes
+
+1. Start the database service normally on **Node 2**:
+```bash
+sudo systemctl start mariadb
+
+```
+
+
+2. Wait for Node 2 to complete its SST/IST sync and reach `Synced` state before starting **Node 3** (this prevents multiple nodes from pulling full snapshots simultaneously).
+
+### 7. Verification & Load Balancing
+
+* **Health Check:** Run `SHOW STATUS LIKE 'wsrep_%';` on any node and confirm:
+* `wsrep_cluster_size` = `3`
+* `wsrep_cluster_status` = `Primary`
+* `wsrep_local_state_comment` = `Synced`
+* `wsrep_ready` = `ON`
+
+
+* **Replication Test:** Create a test database/table on Node 1 and verify it appears immediately on Nodes 2 and 3.
+* **Traffic Routing:** Place a SQL-aware proxy like **ProxySQL** or **HAProxy** in front of the nodes to handle health checks, read/write splitting, and automatic failover.
+
+45) Types of mariadb backup?
+
+**MariaDB backups** fall into two main categories—**logical** and **physical**—with further distinctions by scope (full, incremental, partial) and method (hot/online vs. cold/offline). Snapshots and binary log–based recovery are also commonly used.
+
+### 1. Logical vs. Physical Backups
+| Aspect              | Logical Backups                                      | Physical Backups                                      |
+|---------------------|------------------------------------------------------|-------------------------------------------------------|
+| **What they are**   | SQL statements (`CREATE`, `INSERT`, etc.) that recreate the data | Direct copies of data files / directories from the data directory |
+| **Main tools**      | `mariadb-dump` (or `mysqldump`)                     | `mariadb-backup` (formerly `mariabackup`; fork of Percona XtraBackup) |
+| **Flexibility**     | High – can restore to different hardware, MariaDB versions, or even other DBMSs | Lower – generally needs similar hardware/MariaDB version |
+| **Speed / size**    | Slower to create & restore; larger files             | Faster (especially on large DBs); smaller             |
+| **Granularity**     | Easy at database or table level                      | File/directory level (partial possible but more involved) |
+| **What is included**| Schema + data (not logs or config files)             | Data files, tablespaces (InnoDB, Aria, MyRocks, etc.), including encrypted/compressed ones |
+
+**Logical backups** are more portable and human-readable.  
+**Physical backups** are preferred for large production databases because they are faster and nearly non-blocking.
+
+### 2. Full, Incremental, and Partial Backups
+These apply mainly to physical backups with `mariadb-backup`:
+
+- **Full backup** — Complete copy of all (or selected) data. Creates a self-contained backup in an empty target directory.
+- **Incremental backup** — Captures only changes since a previous full (or another incremental) backup, using InnoDB Log Sequence Numbers (LSNs). Saves time and space; requires a base full backup. InnoDB fully supports this; other engines support full only.
+- **Partial backup** — Backs up a subset of databases or tables (via `--databases`, `--tables`, or exclude options). Useful for selective recovery but more complex to restore.
+
+### 3. Hot (Online) vs. Cold (Offline) Backups
+- **Hot / non-blocking** — Database stays online and available for reads/writes. `mariadb-backup` does this by copying files and using InnoDB redo/undo logs to make the backup consistent (minimal locking). Ideal for production.
+- **Cold** — Server is shut down; data directory is simply copied. Simplest and fully consistent, but causes downtime. Also possible via filesystem snapshots.
+
+### 4. Other Common Approaches
+- **Snapshots** — Instant point-in-time copies of the underlying storage volume (common in cloud/Kubernetes environments). Often incremental in nature after the first one. Fast to create and restore; frequently used with MariaDB Cloud or volume snapshot tools.
+- **Binary log (binlog) backups + Point-in-Time Recovery (PITR)** — Continuous logging of changes. Combined with a full/physical backup, you can recover to any specific moment. Essential for minimal data-loss recovery.
+- **Filesystem-level or cloud-native snapshots** — Leverage LVM, ZFS, cloud volume snapshots, etc., for very fast backups (often used with Galera / Enterprise Cluster topologies that prefer snapshots).
+
+### Quick Recommendations
+- **Small databases / portability needed** → Logical (`mariadb-dump`).
+- **Large production systems** → Physical with `mariadb-backup` (full + regular incrementals) + binary logs for PITR.
+- **Cloud / container environments** → Snapshots + physical or logical as needed.
+- Always test restores, store backups off-site, and encrypt sensitive backups.
+
+Official documentation: [MariaDB Backup and Restore Overview](https://mariadb.com/docs/server/server-usage/backup-and-restore/backup-and-restore-overview) and the [mariadb-backup section](https://mariadb.com/docs/server/server-usage/backup-and-restore/mariadb-backup).
+
+46) Mysql Backups?
+
+| Tool | Type | Cost | Hot Backup | Incremental | Notes |
+| --- | --- | --- | --- | --- | --- |
+| mysqldump | Logical | Free | Yes (with options) | No | Built-in, most universal |
+| mydumper / myloader | Logical | Free | Yes | No | Parallel, faster than mysqldump |
+| Percona XtraBackup | Physical | Free | Yes (InnoDB) | Yes | Industry standard open-source hot physical backup |
+| MySQL Enterprise Backup | Physical | Paid (Enterprise) | Yes | Yes | Official Oracle tool, broader engine support |
+| Snapshots (LVM/ZFS/cloud) | Physical | Free / varies | Usually | Varies | Very fast create/restore |
+
+47) How to get Location based connection routing
+
+Galera Cluster – Location-based connection routing
+For your requirement, I recommend a three-node Galera Cluster with one ProxySQL instance in each geographical location.
+
+Each application connects to its local ProxySQL endpoint. ProxySQL sends the connection to the local Galera node. If that node becomes unavailable, ProxySQL redirects new connections to another healthy Galera node.
+
+The data remains fully replicated across all three nodes.
+1. Target architecture
+Assume the following topology (sample IP addresses):
+Location	Galera node	ProxySQL server
+USA	10.10.1.101	10.10.1.10
+India	10.20.1.101	10.20.1.10
+UK	10.30.1.101	10.30.1.10
+
+2. Configure Galera nodes
+Configure all three nodes as members of the same cluster.
+
+Example configuration:
+[mysqld]
+
+wsrep_on=ON
+
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+
+wsrep_cluster_name=production_galera
+
+wsrep_cluster_address=gcomm://10.10.1.101,10.20.1.101,10.30.1.101
+
+wsrep_node_address=10.10.1.101
+
+wsrep_node_name=galera_us
+
+binlog_format=ROW
+
+default_storage_engine=InnoDB
+
+innodb_autoinc_lock_mode=2
+
+
+Change wsrep_node_address and wsrep_node_name on each node.
+
+For geographical deployments, configure Galera segments:
+wsrep_provider_options="gmcast.segment=0"
+
+
+Use:
+- USA: segment 0
+- India: segment 1
+- UK: segment 2
+Segments help optimize group communication in geographically distributed deployments. They do not prevent cross-region replication. 
+MariaDB Documentation+1
+
+3. Install ProxySQL in each location
+Install ProxySQL on three separate servers.
+
+Example for Ubuntu:
+sudo apt install proxysql
+
+
+Start the service:
+sudo systemctl enable proxysql
+sudo systemctl start proxysql
+
+
+Connect to its administration interface:
+mysql -u admin -p \
+-h 127.0.0.1 -P 6032
+
+
+Default ProxySQL ports:
+Port	Purpose
+6032	ProxySQL administration
+6033	Application MySQL connections
+
+Use secure administrative credentials and change defaults in production.
+
+5. Configure ProxySQL for local-node preference
+This is the most important part of your requirement.
+
+You need three different routing configurations:
+ProxySQL location	Preferred node	Fallback nodes
+USA ProxySQL	USA node	India, UK
+India ProxySQL	India node	USA, UK
+UK ProxySQL	UK node	USA, India
+
+There are two ways to implement this.
+
+Recommended approach: Local-first hostgroups
+
+For each ProxySQL instance, configure:
+- Local hostgroup: contains the local Galera node.
+- Fallback hostgroup: contains the other two Galera nodes.
+- Application default route: local hostgroup.
+- Health monitoring: detects when the local node is unavailable or not synchronized.
+- Failover logic: directs new connections to the fallback hostgroup.
+
+
+48) Index Maintenance?
+
+### **MySQL / MariaDB Table Maintenance Commands**
+
+| Command                         | Purpose                                                         | Rebuilds indexes?         |
+| ------------------------------- | --------------------------------------------------------------- | ------------------------- |
+| `ALTER TABLE ... ENGINE=InnoDB` | Rebuilds the table using the InnoDB storage engine              | Yes                       |
+| `OPTIMIZE TABLE`                | Optimizes/rebuilds the table and reclaims space where supported | Generally yes, for InnoDB |
+| `DROP INDEX` + `CREATE INDEX`   | Rebuilds a particular index                                     | Yes                       |
+| `ANALYZE TABLE`                 | Updates optimizer statistics                                    | No                        |
+| `CHECK TABLE`                   | Checks table integrity and reports table status                 | No                        |
+
+**Important DBA notes:**
+
+- `OPTIMIZE TABLE` for InnoDB generally rebuilds the table and its indexes.
+- `ANALYZE TABLE` updates index statistics; it does not defragment or rebuild indexes.
+- `CHECK TABLE` checks for table problems; it is not an index maintenance operation.
+- Rebuilding a table can require additional disk space and may cause locking or performance impact depending on the operation and MySQL/MariaDB version.
+
+
+49) Performance Troubleshooting?
+
+### **SQL Server vs MySQL – Performance Monitoring and Troubleshooting**
+
+| SQL Server               | MySQL                                            | Purpose                                                           |
+| ------------------------ | ------------------------------------------------ | ----------------------------------------------------------------- |
+| Actual Execution Plan    | `EXPLAIN ANALYZE`                                | Analyze actual query execution and runtime statistics             |
+| Estimated Execution Plan | `EXPLAIN`                                        | View the optimizer's estimated execution plan                     |
+| Query Store              | Performance Schema statement digest              | Track query performance and execution statistics over time        |
+| Extended Events          | Performance Schema / general and slow query logs | Capture query activity and troubleshoot performance issues        |
+| SQL Server Profiler      | Performance Schema instrumentation               | Monitor SQL statements and database activity                      |
+| Missing Index DMVs       | `EXPLAIN` and index usage analysis               | Identify potential missing or inefficient indexes                 |
+| `sys.dm_exec_requests`   | `SHOW FULL PROCESSLIST`                          | Monitor currently executing queries and sessions                  |
+| `sys.dm_tran_locks`      | `performance_schema.data_locks`                  | Monitor locks and blocking                                        |
+| `DBCC SHOW_STATISTICS`   | `ANALYZE TABLE` and histogram inspection         | Examine or update optimizer statistics                            |
+| `DBCC SQLPERF`           | InnoDB and global status metrics                 | Monitor transaction log, database engine and performance counters |
+
+### **Important DBA interview notes**
+
+- `EXPLAIN ANALYZE` executes the query and reports actual execution statistics in MySQL 8.0.18 and later.
+- Query Store is not directly equivalent to Performance Schema; Query Store provides historical query plans and runtime statistics.
+- `SHOW FULL PROCESSLIST` provides session activity, while Performance Schema provides deeper diagnostic information.
+- `ANALYZE TABLE` updates optimizer statistics; it is not a direct equivalent of `DBCC SHOW_STATISTICS`.
+- Performance Schema is MySQL's primary built-in instrumentation framework for performance troubleshooting.
+
+50) Where to keep Galera specific configuration? 
+Add the Galera config on all 3 servers in /etc/mysql/mariadb.conf.d/60-galera.cnf. Change only the node name and IP on each:
+galera]
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+wsrep_cluster_name=prod_cluster
+wsrep_cluster_address=gcomm://10.0.0.11,10.0.0.12,10.0.0.13
+wsrep_node_name=node1
+wsrep_node_address=10.0.0.11
+wsrep_sst_method=mariabackup
+wsrep_sst_auth=sstuser:sstpass
+binlog_format=ROW
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+bind-address=0.0.0.0
+
+Either location works, because mariadb.cnf includes both folders. Use one location only, so the same setting isn't defined in two places.
+
+Location	When to use
+/etc/mysql/mariadb.conf.d/60-galera.cnf	VM or server install: edit the placeholder file that's already there (what I used in the conversion steps)
+/etc/mysql/conf.d/galera.cnf	Your Docker lab, or whenever you want your settings kept apart from the packaged files
+
+50) Which actual configuration file of MariaDB?
+'s a symbolic link (a shortcut). /etc/mysql/my.cnf isn't a real file; it points to /etc/alternatives/my.cnf, which is itself a link to the real file. In your container that real file is /etc/mysql/mariadb.cnf
+
+51) Where Galera related configuration to set?
+Usually its will be on galera.cnf under /etc/mysql/conf.d. But we can also add this settings in my.cnf under mysqld section
+
+52) SHOW VARIABLES vs SHOW STATUS
+
+| Aspect              | SHOW VARIABLES                  | SHOW GLOBAL STATUS                  |
+|---------------------|---------------------------------|-------------------------------------|
+| What it shows       | Configuration / settings        | Runtime statistics / counters       |
+| Can you change?     | Yes (many of them)              | No (read-only)                      |
+| Typical use         | Tuning, checking current config | Monitoring, performance analysis    |
+| Default scope       | SESSION                         | SESSION                             |
+| Most useful form    | SHOW GLOBAL VARIABLES           | SHOW GLOBAL STATUS                  |
+| Name style          | Usually lowercase               | Usually Capitalized / UPPERCASE     |
+
+53) What to do if wsrep_local_recv_queue (and _max) is increasing
+
+A growing wsrep_local_recv_queue means this node receives replicated writes faster than it can apply them. If the queue passes gcs.fc_limit, the node sends flow control and slows down writes on the whole cluster.
+
+1. Find which node is slow. Run this on every node; the slow one has a high queue and an increasing wsrep_flow_control_sent:
+
+SHOW GLOBAL STATUS WHERE Variable_name IN
+('wsrep_local_recv_queue','wsrep_local_recv_queue_max','wsrep_flow_control_sent','wsrep_flow_control_paused','wsrep_cert_deps_distance');
+wsrep_local_recv_queue_max is the highest value since the last reset. Run FLUSH STATUS to reset it before watching again.
+
+2. Check the node's resources (CPU, disk I/O, swap) with top, iostat -x 1 and vmstat 1. On Docker, use docker stats. Slow disks are the most common cause. Also check whether a backup, SST/IST, or a heavy local query is running on that node.
+
+3. Look for things blocking the apply threads:
+
+SHOW PROCESSLIST;                -- long-running queries, apply threads waiting
+SHOW ENGINE INNODB STATUS\G      -- lock waits, history list length
+Common causes: long transactions or SELECT ... FOR UPDATE on the slow node, LOCK TABLES, DDL (ALTER TABLE, which blocks the cluster by default), and tables without primary keys. Rows without a key are very slow to apply.
+
+4. Apply changes in parallel. If wsrep_cert_deps_distance is above 1, more threads can help. Start around the number of CPU cores:
+
+SET GLOBAL wsrep_slave_threads = 4;   -- also set in galera.cnf to keep it after restart
+In MariaDB 10.6+, this variable is also called wsrep_applier_threads.
+
+5. Speed up InnoDB writes on that node (in galera.cnf):
+
+innodb_buffer_pool_size = 60-70% of RAM
+innodb_log_file_size    = 1G            # larger redo log
+innodb_flush_log_at_trx_commit = 2      # faster; Galera's other copies still protect the data
+innodb_io_capacity      = match your disk (SSD: 2000+)
+6. Reduce the load.
+
+Break big batch jobs into smaller transactions; aim for under about 10k rows per commit.
+Send heavy reports to a node that isn't busy, or to an async replica.
+Make sure all nodes have similar hardware. The slowest node sets the speed of the whole cluster.
+7. Tune flow control (only after steps 1–6). You can raise the limit so short bursts don't pause the cluster:
+
+wsrep_provider_options="gcs.fc_limit=256;gcs.fc_factor=0.8"
+This hides lag rather than fixing it, so the node can fall further behind.
+
+
+54) What is flow control in galera cluster?
+Flow Control in MariaDB (specifically in MariaDB Galera Cluster) is a built-in feedback mechanism that keeps all nodes in the cluster roughly synchronized.
+
+How it works (simplified)
+A node receives write-sets faster than it can apply them → its receive queue grows.
+When the queue exceeds the limit (gcs.fc_limit), the node sends a Flow Control PAUSE message to the whole cluster.
+All nodes stop sending/replicating new transactions (existing ones in queues continue).
+The slow node catches up and drains its queue.
+When the queue drops below a lower threshold (gcs.fc_limit * gcs.fc_factor), it sends a RESUME message.
+Normal replication continues.
+
+54.1) What to do if wsrep_flow_control_paused has high value?
+
+Practical notes
+A high wsrep_flow_control_paused value means one (or more) nodes are slowing down the entire cluster.
+Common causes: slow disk, too few wsrep_slave_threads, large transactions, network issues, or a node acting as donor during SST.
+Increasing wsrep_slave_threads (to match CPU cores) and raising gcs.fc_limit are the most common ways to reduce Flow Control pauses.
+
+55) What is Galera cluster pause / flow control pause?
+
+Cluster Pause in Galera refers to the Flow Control Pause mechanism.What it isWhen one node in a Galera cluster falls behind in applying write-sets (its receive queue grows too large), it tells the entire cluster to temporarily stop accepting new writes. This is called a Flow Control Pause.It is Galera’s way of keeping all nodes in sync by making the whole cluster wait for the slowest node.How it works
+
+A node’s receive queue (wsrep_local_recv_queue) exceeds the limit (gcs.fc_limit).
+That node broadcasts a Flow Control PAUSE message to all other nodes.
+All nodes stop replicating new transactions (writes are blocked cluster-wide).
+The slow node catches up and drains its queue.
+When the queue drops below the lower threshold (gcs.fc_limit * gcs.fc_factor), it sends a RESUME message.
+The cluster starts accepting writes again.
+
+
+56) What happens if flow control pause the server?
+
+Yes, you can increase the Galera Flow Control threshold so that the cluster does not trigger a replication pause too easily.
+
+However, there is an important distinction: Flow Control does not shut down the MariaDB server or directly stop application connections. It temporarily pauses replication of incoming write-sets across the cluster so that a slower node can catch up. This can increase transaction commit latency and make applications appear unresponsive, particularly under heavy write workloads. 
+MariaDB Documentation+1
+
+1. Which parameter controls Flow Control?
+The primary parameter is:
+
+gcs.fc_limit
+Parameter	Purpose	Tuning impact
+gcs.fc_limit	Receive queue threshold that triggers Flow Control	Higher value delays Flow Control
+gcs.fc_factor	Determines when Flow Control resumes	Higher value resumes replication sooner
+wsrep_local_recv_queue	Current receive queue size	Shows pending write-sets
+wsrep_flow_control_paused	Fraction of time replication was paused	Indicates Flow Control impact
+
+For example:
+- gcs.fc_limit = 16: lower threshold.
+- gcs.fc_limit = 100: higher threshold.
+- gcs.fc_limit = 256: allows a larger replication backlog before triggering Flow Control.
+These are illustrative tuning values, not universal production recommendations.
+2. Recommended configuration example
+For a controlled test, you could evaluate:
+[mariadb]
+
+wsrep_provider_options="gcs.fc_limit=256;gcs.fc_factor=0.8"
+
+
+--General Mariadb health perf check?
+
+1. What is running right now
+
+SHOW FULL PROCESSLIST;   -- long Time, "Waiting for ... lock", "Sending data", "Copying to tmp table"
+SELECT id,user,db,time,state,LEFT(info,100) q FROM information_schema.processlist
+WHERE command<>'Sleep' ORDER BY time DESC LIMIT 20;
+SELECT trx_id,trx_started,trx_rows_locked,trx_query FROM information_schema.innodb_trx ORDER BY trx_started;  -- old open transactions
+2. Server resources (OS)
+
+top, vmstat 1 and iostat -x 1 (or docker stats) show CPU, swap use, and disk %util and await.
+df -h shows free disk. A full disk or heavy swapping is a common hidden cause.
+3. Connections and threads
+
+SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Threads_running','Max_used_connections',
+ 'Aborted_connects','Aborted_clients','Connection_errors_max_connections');
+SHOW VARIABLES LIKE 'max_connections';
+Threads_running staying above the CPU count means the server is overloaded or queries are piling up.
+
+4. InnoDB memory and I/O
+
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read%';  -- reads / read_requests should be < 1%
+SHOW VARIABLES LIKE 'innodb_buffer_pool_size';       -- ~60-70% of RAM on a dedicated server
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_wait_free';  -- > 0 = pool too small
+SHOW GLOBAL STATUS LIKE 'Innodb_log_waits';              -- > 0 = redo log too small
+SHOW ENGINE INNODB STATUS\G   -- LATEST DETECTED DEADLOCK, History list length (high = long transactions)
+5. Locks and waits
+
+SELECT * FROM information_schema.innodb_lock_waits;
+SHOW GLOBAL STATUS LIKE 'Innodb_row_lock%';     -- current_waits, time_avg
+SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks';
+6. Query efficiency counters
+
+SHOW GLOBAL STATUS WHERE Variable_name IN ('Select_full_join','Select_scan','Sort_merge_passes',
+ 'Created_tmp_disk_tables','Created_tmp_tables','Handler_read_rnd_next','Slow_queries');
+High Select_full_join or Handler_read_rnd_next means indexes are missing (full table scans).
+A high share of Created_tmp_disk_tables means you should check tmp_table_size and max_heap_table_size, or fix the queries.
+7. Find the expensive queries. Turn on the slow query log:
+
+SET GLOBAL slow_query_log=1; SET GLOBAL long_query_time=1; SET GLOBAL log_queries_not_using_indexes=1;
+SHOW VARIABLES LIKE 'slow_query_log_file';
+Then summarize the log with the free pt-query-digest from Percona Toolkit, or with mariadb-dumpslow.
+
+For each bad query, check its plan:
+
+EXPLAIN SELECT ...;        -- type=ALL, large "rows", "Using filesort/temporary" = problems
+ANALYZE SELECT ...;        -- MariaDB: real row counts vs estimates
+8. Schema checks
+
+-- tables without primary key (also bad for Galera)
+SELECT t.table_schema,t.table_name FROM information_schema.tables t
+LEFT JOIN information_schema.table_constraints c ON c.table_schema=t.table_schema AND c.table_name=t.table_name AND c.constraint_type='PRIMARY KEY'
+WHERE c.constraint_name IS NULL AND t.table_type='BASE TABLE' AND t.table_schema NOT IN ('mysql','information_schema','performance_schema','sys');
+-- largest tables
+SELECT table_schema,table_name,ROUND((data_length+index_length)/1024/1024) mb FROM information_schema.tables ORDER BY mb DESC LIMIT 10;
+-- non-InnoDB tables
+SELECT table_schema,table_name,engine FROM information_schema.tables WHERE engine NOT IN ('InnoDB') AND table_schema NOT IN ('mysql','information_schema','performance_schema','sys');
+Also refresh table statistics with ANALYZE TABLE when query plans look wrong.
+
+9. Key settings to review
+innodb_buffer_pool_size, innodb_log_file_size, innodb_flush_log_at_trx_commit, innodb_io_capacity, max_connections, tmp_table_size, table_open_cache (compare with Opened_tables), and thread_cache_size (compare with Threads_created).
+
+
+57) How to make Galera cluster single master?
+
+You can't switch Galera itself to master-slave: every node can always accept writes. There are 2 ways to get master-slave behaviour.
+
+Option 1: keep Galera, write to only one node. This is the usual setup in production.
+
+Route with a proxy: send all writes to node1 and fail over to node2 if it dies. In HAProxy (free), list node1 as the active server and node2 and node3 as backup. ProxySQL (free) can also send writes to one node and spread reads across all 3.
+Or block writes on the readers yourself:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

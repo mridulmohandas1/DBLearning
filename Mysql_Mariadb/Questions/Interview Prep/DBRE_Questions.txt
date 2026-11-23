@@ -1,0 +1,72 @@
+1) SLI, SLO, RTO ans RPO
+
+🔹 1. SLI (Service Level Indicator)
+
+What it is:
+A measured metric of system performance.
+
+👉 It answers: “How is the system actually performing?”
+
+Examples:
+	Request success rate = 99.9%
+	API latency = 200 ms
+	DB query success %
+
+👉 Think: raw measurement
+
+🔹 2. SLO (Service Level Objective)
+
+What it is:
+A target/goal set for an SLI.
+
+👉 It answers: “What level of performance do we aim for?”
+
+Examples:
+	99.9% of requests should succeed
+	95% of queries should complete in < 300 ms
+
+👉 Think: target you commit to internally
+
+🔹 3. RTO (Recovery Time Objective)
+
+What it is:
+Maximum time allowed to restore service after a failure.
+
+👉 It answers: “How fast should we recover?”
+
+Examples:
+	RTO = 30 minutes
+	→ System must be back within 30 mins after crash
+
+👉 Think: downtime tolerance
+
+🔹 4. RPO (Recovery Point Objective)
+
+What it is:
+Maximum data loss allowed measured in time.
+
+👉 It answers: “How much data can we afford to lose?”
+
+Examples:
+	RPO = 5 minutes
+	→ You can lose last 5 minutes of data
+
+👉 Think: data loss tolerance
+
+🔥 Simple way to remember
+Term	Meaning	          Focus
+SLI	Measurement	  Current performance
+SLO	Target	          Expected performance
+RTO	Time to recover	  Downtime
+RPO	Data loss allowed Data safety
+
+2) How to set SLO?
+Set realistic SLO targets
+Now convert SLIs → SLOs (targets)
+
+🔸 Example SLOs for a database
+
+Availability SLO --> “99.9% of queries should succeed over 30 days”
+Latency SLO --> “95% of queries should complete in < 200 ms”
+Error rate SLO --> “< 0.1% query failures”
+Replication SLO --> “Replication lag < 5 seconds”
