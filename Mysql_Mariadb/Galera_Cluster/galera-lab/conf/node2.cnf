@@ -1,0 +1,13 @@
+[mysqld]
+binlog_format=ROW
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+bind-address=0.0.0.0
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+wsrep_cluster_name=lab_cluster
+wsrep_cluster_address=gcomm://node1,node2,node3
+wsrep_node_name=node2
+wsrep_node_address=node2
+wsrep_sst_method=mariabackup
+wsrep_sst_auth=root:rootpass

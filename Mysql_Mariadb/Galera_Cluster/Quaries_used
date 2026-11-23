@@ -1,0 +1,45 @@
+1) Download setup file
+
+2) copy setup.sh to /Users/mridul.mohandas/Lab/Galera
+
+3) cd /Users/mridul.mohandas/Lab/Galera
+
+4) execute setup: b
+	ash setup.sh
+
+5) Connect Instance:
+
+Connect to one node (inside Docker, no install needed). Run from the galera-lab folder:
+
+docker compose exec node1 mariadb -uroot -prompts
+docker compose exec node1 mariadb -uroot -prootpass
+Use node2 or node3 for the other nodes.
+
+Connect from your Mac. Install a client with brew install mariadb, or use DBeaver or MySQL Workbench:
+
+mariadb -h 127.0.0.1 -P 3307 -uroot -prootpass   # node1
+mariadb -h 127.0.0.1 -P 3308 -uroot -prootpass   # node2
+mariadb -h 127.0.0.1 -P 3309 -uroot -prootpass   # node3
+
+---Check cluster status on all nodes--
+
+for n in node1 node2 node3; do echo "== $n"; docker compose exec -T $n mariadb -uroot -prootpass -N -e "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_local_state_comment','wsrep_ready','wsrep_connected','wsrep_flow_control_paused','wsrep_local_recv_queue_avg');"; done
+
+for n in node1 node2 node3; do echo "== $n"; docker compose exec -T $n mariadb -uroot -prootpass -N -e "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_state_uuid','wsrep_cluster_conf_id','wsrep_last_committed','wsrep_incoming_addresses','wsrep_evs_state');"; done
+
+
+
+
+SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_local_state_comment','wsrep_ready','wsrep_connected','wsrep_flow_control_paused','wsrep_local_recv_queue_avg')
+
+for n in node1 node2 node3; do echo "== $n"; docker compose exec -T $n mariadb -uroot -prootpass -N -e "SHOW DATABASES;"; done
+
+--Connet container
+
+docker exec -it galera-lab-node1-1 bash
+
+---search
+
+find /opt/homebrew /usr/local /etc -name my.cnf 2>/dev/null
+
+

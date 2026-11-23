@@ -1,0 +1,26 @@
+x-node: &node
+  image: mirror.gcr.io/library/mariadb:11.4
+  environment:
+    MARIADB_ROOT_PASSWORD: rootpass
+  networks: [galera]
+services:
+  node1:
+    <<: *node
+    hostname: node1
+    command: --wsrep-new-cluster
+    volumes: [./conf/node1.cnf:/etc/mysql/conf.d/galera.cnf:ro, n1:/var/lib/mysql]
+    ports: ["3307:3306"]
+  node2:
+    <<: *node
+    hostname: node2
+    volumes: [./conf/node2.cnf:/etc/mysql/conf.d/galera.cnf:ro, n2:/var/lib/mysql]
+    ports: ["3308:3306"]
+    depends_on: [node1]
+  node3:
+    <<: *node
+    hostname: node3
+    volumes: [./conf/node3.cnf:/etc/mysql/conf.d/galera.cnf:ro, n3:/var/lib/mysql]
+    ports: ["3309:3306"]
+    depends_on: [node1]
+networks: {galera: {}}
+volumes: {n1: {}, n2: {}, n3: {}}
